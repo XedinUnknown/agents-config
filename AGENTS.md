@@ -60,8 +60,24 @@ visible in config. Targets run in first-appearance order (`config.yaml`'s
 first); re-declaring an inherited target changes its settings, not its
 position. The merge contains only what config says — handler defaults are not
 merged in (see Target handlers). Dependencies are keyed by normalized repo
-(`dependencyKey`): a later layer's entry for the same repo replaces the
-earlier one *in place*, distinct repos append.
+or path (`dependencyKey`): a later layer's entry for the same one replaces
+the earlier one *in place*, distinct ones append.
+
+**Dependencies: `repo` vs `path` (`src/layer.ts`)**: `repo` is a repository
+URI or `owner/repo` only — a bare filesystem path is rejected with a hint,
+because relative paths there were resolved against the clone cache (and
+every project's `repo: .` would have shared one cache entry). `path` is a
+folder with the standard `skills/` + `agents/` layout, resolved against the
+project: live without `ref` (linked by default, relative), or with `ref`
+read via `git archive` of the resolved commit into the cache (`repo/snapshot`,
+keyed by repository and commit) and recorded as `{path, ref, commit}`. Like
+Composer's path repositories, a live path pins nothing — the project's own
+commit pins it, since path sources normally live in the same repo; `ref` is
+for pinning anyway. The convention this enables: a project's own skills live
+in its `skills/`/`agents/` and come in via `path: .`, so install folders hold
+only installed content and are ignored whole. `~/.agents` is the exception
+(its `skills/` is both, because Codex/OpenCode read `~/.agents/skills`
+natively), so it keeps a manual ignore list.
 
 **Collision rule: last wins (`src/plan.ts`)**: when two dependencies provide
 the same skill or agent name, the later one in merged order replaces the

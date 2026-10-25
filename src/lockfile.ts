@@ -5,7 +5,8 @@
  * The lock records:
  *
  *  - `skills`/`agents`: the final winner per name after the last-wins plan
- *    (see plan.ts) — which repo and ref each installed name came from.
+ *    (see plan.ts) — where each installed name came from: `{repo, ref}`,
+ *    `{path}` for a live folder, or `{path, ref, commit}` for a pinned one.
  *  - `targets`: one record per target, naming the handler that installed it
  *    and holding that handler's own state — e.g. the built-in handlers list
  *    every concrete path they placed on disk, and only ever update or remove
@@ -15,12 +16,11 @@
  */
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import type { Origin } from "./plan.ts";
 import type { Provider } from "./di/index.ts";
 
-export interface LockWinner {
-  repo: string;
-  ref: string;
-}
+/** Where a winning item came from: a repo at a ref, or a path (pinned to a commit when it has a ref). */
+export type LockWinner = Origin;
 
 export interface LockTarget {
   handler: string;

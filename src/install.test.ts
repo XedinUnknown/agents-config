@@ -41,7 +41,7 @@ function skillPlan(...items: DesiredItem[]): Plan {
 }
 
 function skill(name: string, sourcePath: string, repo = "owner/repo"): DesiredItem {
-  return { name, sourcePath, repo, ref: "main" };
+  return { name, sourcePath, origin: { repo, ref: "main" } };
 }
 
 const FOO = join(".agents", "skills", "foo");

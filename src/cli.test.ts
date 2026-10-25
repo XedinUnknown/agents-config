@@ -83,7 +83,7 @@ test("cli/add writes agents.yaml, then installs, and cli/list reports the added 
     });
 
     const add = container.resolve<(repo: string, options: AddCommandOptions) => Promise<void>>("cli/add");
-    await add(sourceRepo, defaultAddOptions());
+    await add(`file://${sourceRepo}`, defaultAddOptions());
 
     const manifestContent = await readFile(join(projectDir, "agents.yaml"), "utf-8");
     assert.match(manifestContent, new RegExp(sourceRepo.replace(/[/\\]/g, "\\$&")));
@@ -114,13 +114,13 @@ test("cli/remove removes the dependency from agents.yaml and prunes the install"
     });
 
     const add = container.resolve<(repo: string, options: AddCommandOptions) => Promise<void>>("cli/add");
-    await add(sourceRepo, defaultAddOptions());
+    await add(`file://${sourceRepo}`, defaultAddOptions());
 
     const installed = join(projectDir, ".agents", "skills", "demo-skill", "SKILL.md");
     assert.equal(await pathExists(installed), true);
 
     const remove = container.resolve<(repo: string) => Promise<void>>("cli/remove");
-    await remove(sourceRepo);
+    await remove(`file://${sourceRepo}`);
 
     const manifestContent = await readFile(join(projectDir, "agents.yaml"), "utf-8");
     assert.doesNotMatch(manifestContent, new RegExp(sourceRepo.replace(/[/\\]/g, "\\$&")));
@@ -176,7 +176,7 @@ test("cli/config prints the resolved config path and cache dir for this invocati
 
 test("cli/install runs the same install pipeline as run/install", async () => {
   await withFixture(async ({ sourceRepo, projectDir, configDir, root }) => {
-    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: ${sourceRepo}\n    ref: main\n    agents: false\n`);
+    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: file://${sourceRepo}\n    ref: main\n    agents: false\n`);
 
     const container = bootstrapApp({
       cwd: projectDir,
@@ -204,7 +204,7 @@ test("cli/add keeps agents.yaml's targets and other settings when adding a depen
     });
 
     const add = container.resolve<(repo: string, options: AddCommandOptions) => Promise<void>>("cli/add");
-    await add(sourceRepo, defaultAddOptions({ agents: false }));
+    await add(`file://${sourceRepo}`, defaultAddOptions({ agents: false }));
 
     const manifestContent = await readFile(join(projectDir, "agents.yaml"), "utf-8");
     assert.match(manifestContent, /# mine/);
@@ -216,7 +216,7 @@ test("cli/add keeps agents.yaml's targets and other settings when adding a depen
 test("cli/list shows dependencies from both layers with their source, and the merged targets", async () => {
   await withFixture(async ({ sourceRepo, projectDir, configDir, root }) => {
     await writeConfig(configDir, "targets:\n  interop: true\ndependencies:\n  - repo: owner/from-config\n");
-    await writeFile(join(projectDir, "agents.yaml"), `targets:\n  claude: true\ndependencies:\n  - repo: ${sourceRepo}\n`);
+    await writeFile(join(projectDir, "agents.yaml"), `targets:\n  claude: true\ndependencies:\n  - repo: file://${sourceRepo}\n`);
     const container = bootstrapApp({
       cwd: projectDir,
       env: process.env,
@@ -235,5 +235,34 @@ test("cli/list shows dependencies from both layers with their source, and the me
     assert.ok(logs.some((line) => line.includes("owner/from-config") && line.includes("from config.yaml")), logs.join("\n"));
     assert.ok(logs.some((line) => line.includes(sourceRepo) && line.includes("from agents.yaml")), logs.join("\n"));
     assert.ok(logs.some((line) => line === "targets: interop, claude"), logs.join("\n"));
+  });
+});
+
+test("cli/list shows a path dependency, and cli/remove removes it by path", async () => {
+  await withFixture(async ({ projectDir, configDir, root }) => {
+    await mkdir(join(projectDir, "skills", "own"), { recursive: true });
+    await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# own");
+    await writeFile(join(projectDir, "agents.yaml"), "# keep me\ndependencies:\n  - path: ./\n");
+    const container = bootstrapApp({
+      cwd: projectDir,
+      env: process.env,
+      configDirOverride: configDir,
+      cacheDirOverride: join(root, "cache"),
+    });
+
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+    try {
+      await container.resolve<() => Promise<void>>("cli/list")();
+      await container.resolve<() => Promise<void>>("cli/install")();
+      assert.equal(await pathExists(join(projectDir, ".agents", "skills", "own", "SKILL.md")), true);
+      await container.resolve<(r: string) => Promise<void>>("cli/remove")(".");
+    } finally {
+      console.log = originalLog;
+    }
+    assert.ok(logs.some((line) => line.includes("path:./ (live, from agents.yaml)")), logs.join("\n"));
+    assert.match(await readFile(join(projectDir, "agents.yaml"), "utf-8"), /# keep me\ndependencies: \[\]/);
+    assert.equal(await pathExists(join(projectDir, ".agents", "skills", "own")), false);
   });
 });

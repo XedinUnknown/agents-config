@@ -11,17 +11,20 @@
  *       handler: interop           # optional; defaults to the handler named like the target
  *       paths: { skills: skills, agents: agents }   # absent/null = the handler's default
  *   dependencies:
- *     - repo: owner/repo
+ *     - repo: owner/repo           # or https://, git@host:, file:// URI
  *       ref: main
  *       skills: "*" | [names] | true | false
  *       agents: "*" | [names] | true | false
+ *     - path: .                    # a folder with skills/ + agents/, relative to
+ *       ref: v1.2                  # the project; optional ref pins it to a revision
+ *       install_method: copy       # optional per-dependency override
  *
  * Merge order is config.yaml -> agents.yaml: scalars replace, maps merge by
  * key (a target definition naming a different handler than the one it
  * overrides starts from fresh settings, since the old handler's settings mean
  * nothing to the new one). Defaults are not part of the merge: each handler
  * applies its own to settings that are absent or null. Dependencies are keyed
- * by normalized repo: a later layer's entry for the same repo replaces the earlier one in place,
+ * by normalized repo or path: a later layer's entry for the same repo replaces the earlier one in place,
  * a new repo appends. There is no default target: if no layer declares
  * `targets`, install stops with an error (declare `interop: true` in
  * config.yaml for the usual default).
@@ -36,16 +39,40 @@
  * hint rather than ignored, so a legacy config can never silently fall back
  * to the default target.
  */
+import { normalize } from "node:path";
 import { parse } from "yaml";
 import type { Target } from "./registry.ts";
 
 export type Selection = "*" | string[] | false;
 
-export interface Dependency {
-  repo: string;
-  ref: string;
+interface DependencyBase {
   skills: Selection;
   agents: Selection;
+  /** Overrides the run's install method for this dependency's items. */
+  install_method?: "link" | "copy";
+}
+
+/** A git repository, by URI (`https://`, `git@host:`, `file://`, ...) or `owner/repo` GitHub shorthand. */
+export interface RepoDependency extends DependencyBase {
+  repo: string;
+  ref: string;
+}
+
+/**
+ * A folder with the standard `skills/` + `agents/` layout, relative to the
+ * project directory (or absolute). Without `ref` it is read live from disk
+ * and linked by default; with `ref` it is read from git at that revision,
+ * which pins it.
+ */
+export interface PathDependency extends DependencyBase {
+  path: string;
+  ref?: string;
+}
+
+export type Dependency = RepoDependency | PathDependency;
+
+export function isPathDependency(dep: Dependency): dep is PathDependency {
+  return "path" in dep;
 }
 
 /** A target definition in one layer: an optional handler name plus that handler's options. */
@@ -69,9 +96,33 @@ export interface Settings {
   dependencies: Dependency[];
 }
 
-/** Dependency identity across layers (and for `add`/`remove`). */
-export function dependencyKey(repo: string): string {
-  return repo.replace(/\.git$/, "").toLowerCase();
+export function repoKey(repo: string): string {
+  return `repo:${repo.replace(/\.git$/, "").toLowerCase()}`;
+}
+
+export function pathKey(path: string): string {
+  const normalized = normalize(path).replace(/\/+$/, "");
+  return `path:${normalized === "" ? "." : normalized}`;
+}
+
+/** Dependency identity across layers (and for `remove`). */
+export function dependencyKey(dep: Dependency): string {
+  return isPathDependency(dep) ? pathKey(dep.path) : repoKey(dep.repo);
+}
+
+/** How a dependency is shown in output: its repo, or `path:<path>`. */
+export function dependencyLabel(dep: Dependency): string {
+  return isPathDependency(dep) ? `path:${dep.path}` : dep.repo;
+}
+
+/**
+ * Whether `repo` is a repository URI or `owner/repo` shorthand — not a bare
+ * filesystem path, which belongs in `path:` (or `file://` for a repository).
+ */
+export function isRepoUri(repo: string): boolean {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(repo)) return true; // https://, ssh://, file://
+  if (/^[^@/\s]+@[^:/\s]+:/.test(repo)) return true; // git@host:owner/repo
+  return /^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]+$/.test(repo); // owner/repo
 }
 
 function normalizeSelection(raw: unknown, field: string, source: string): Selection {
@@ -83,15 +134,43 @@ function normalizeSelection(raw: unknown, field: string, source: string): Select
 
 function normalizeDependency(raw: unknown, index: number, source: string): Dependency {
   const dep = (raw ?? {}) as Record<string, unknown>;
-  if (typeof dep["repo"] !== "string" || dep["repo"] === "") {
-    throw new Error(`${source}: dependency at index ${index} is missing required 'repo' field`);
+  const where = `${source}: dependency at index ${index}`;
+  const hasRepo = dep["repo"] !== undefined;
+  const hasPath = dep["path"] !== undefined;
+  if (hasRepo === hasPath) {
+    throw new Error(`${where} needs exactly one of 'repo' or 'path'`);
   }
-  return {
-    repo: dep["repo"],
-    ref: typeof dep["ref"] === "string" ? dep["ref"] : "main",
+  if (dep["ref"] !== undefined && (typeof dep["ref"] !== "string" || dep["ref"] === "")) {
+    throw new Error(`${where}: 'ref' must be a non-empty string`);
+  }
+  const installMethod = dep["install_method"];
+  if (installMethod !== undefined && installMethod !== "link" && installMethod !== "copy") {
+    throw new Error(`${where}: install_method must be "link" or "copy"`);
+  }
+  const base: DependencyBase = {
     skills: normalizeSelection(dep["skills"], "skills", source),
     agents: normalizeSelection(dep["agents"], "agents", source),
+    ...(installMethod !== undefined ? { install_method: installMethod } : {}),
   };
+
+  if (hasPath) {
+    if (typeof dep["path"] !== "string" || dep["path"] === "") {
+      throw new Error(`${where}: 'path' must be a non-empty string`);
+    }
+    return { path: dep["path"], ...(dep["ref"] !== undefined ? { ref: dep["ref"] as string } : {}), ...base };
+  }
+
+  const repo = dep["repo"];
+  if (typeof repo !== "string" || repo === "") {
+    throw new Error(`${where}: 'repo' must be a non-empty string`);
+  }
+  if (!isRepoUri(repo)) {
+    throw new Error(
+      `${where}: '${repo}' is not a repository URI or owner/repo. ` +
+        "Use 'path:' for a folder, or a file:// URI for a local repository."
+    );
+  }
+  return { repo, ref: (dep["ref"] as string | undefined) ?? "main", ...base };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -223,7 +302,7 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
     }
 
     for (const dep of layer.dependencies ?? []) {
-      dependencies.set(dependencyKey(dep.repo), dep);
+      dependencies.set(dependencyKey(dep), dep);
     }
   }
 

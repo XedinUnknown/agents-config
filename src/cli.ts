@@ -6,7 +6,17 @@
  */
 import { join } from "node:path";
 import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn } from "./cache.ts";
-import { dependencyKey, mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
+import {
+  dependencyKey,
+  dependencyLabel,
+  isRepoUri,
+  mergeLayers,
+  pathKey,
+  repoKey,
+  type Dependency,
+  type Layer,
+  type Selection,
+} from "./layer.ts";
 import type { DiscoveredItem } from "./discovery.ts";
 import type { Container, Provider } from "./di/index.ts";
 
@@ -49,10 +59,11 @@ export function cliProvider(): Provider {
           return;
         }
 
-        const projectKeys = new Set((project.dependencies ?? []).map((d) => dependencyKey(d.repo)));
+        const projectKeys = new Set((project.dependencies ?? []).map(dependencyKey));
         for (const dep of settings.dependencies) {
-          const source = projectKeys.has(dependencyKey(dep.repo)) ? "agents.yaml" : "config.yaml";
-          console.log(`  ${dep.repo} (ref: ${dep.ref}, from ${source})`);
+          const source = projectKeys.has(dependencyKey(dep)) ? "agents.yaml" : "config.yaml";
+          const ref = dep.ref !== undefined ? `ref: ${dep.ref}` : "live";
+          console.log(`  ${dependencyLabel(dep)} (${ref}, from ${source})`);
           console.log(`    skills: ${describeSelection(dep.skills)}`);
           console.log(`    agents: ${describeSelection(dep.agents)}`);
         }
@@ -77,6 +88,14 @@ export function cliProvider(): Provider {
           const targetPath = join(cwd, "agents.yaml");
           const project = (await manifestExists(targetPath)) ? await loadManifest(targetPath) : {};
           const settings = mergeLayers([machine, project]);
+
+          if (!isRepoUri(repo)) {
+            console.error(
+              `✗ '${repo}' is not a repository URI or owner/repo. ` +
+                "For a folder, add a 'path:' dependency to agents.yaml; for a local repository, use a file:// URI."
+            );
+            process.exit(1);
+          }
 
           const url = resolveRepoUrl(repo, settings.clone_method);
           const cacheKey = deriveCacheKey(repo, options.ref);
@@ -106,7 +125,7 @@ export function cliProvider(): Provider {
           const dep: Dependency = { repo, ref: options.ref, skills, agents };
 
           const dependencies = [...(project.dependencies ?? [])];
-          const idx = dependencies.findIndex((d) => dependencyKey(d.repo) === dependencyKey(repo));
+          const idx = dependencies.findIndex((d) => dependencyKey(d) === dependencyKey(dep));
           const verb = idx === -1 ? "added" : "updated";
           if (idx === -1) dependencies.push(dep);
           else dependencies[idx] = dep;
@@ -119,7 +138,7 @@ export function cliProvider(): Provider {
 
       "cli/remove":
         (c: Container) =>
-        async (repo: string): Promise<void> => {
+        async (repoOrPath: string): Promise<void> => {
           const machine = await c.resolve<Promise<Layer>>("config/loaded");
           const cwd = c.resolve<string>("platform/cwd");
           const manifestExists = c.resolve<(path: string) => Promise<boolean>>("manifest/exists");
@@ -134,21 +153,23 @@ export function cliProvider(): Provider {
             process.exit(1);
           }
 
+          // The argument names either a repo or a path dependency.
+          const matches = (d: Dependency) => [repoKey(repoOrPath), pathKey(repoOrPath)].includes(dependencyKey(d));
           const dependencies = [...((await loadManifest(targetPath)).dependencies ?? [])];
-          const idx = dependencies.findIndex((d) => dependencyKey(d.repo) === dependencyKey(repo));
+          const idx = dependencies.findIndex(matches);
           if (idx === -1) {
-            const inMachine = (machine.dependencies ?? []).some((d) => dependencyKey(d.repo) === dependencyKey(repo));
+            const inMachine = (machine.dependencies ?? []).some(matches);
             console.error(
               inMachine
-                ? `✗ ${repo} is declared in config.yaml, not agents.yaml — remove it there`
-                : `✗ ${repo} not found in agents.yaml`
+                ? `✗ ${repoOrPath} is declared in config.yaml, not agents.yaml — remove it there`
+                : `✗ ${repoOrPath} not found in agents.yaml`
             );
             process.exit(1);
           }
 
           const [removed] = dependencies.splice(idx, 1);
           await saveDependencies(targetPath, dependencies);
-          console.log(`✓ removed ${removed?.repo} from agents.yaml`);
+          console.log(`✓ removed ${removed ? dependencyLabel(removed) : repoOrPath} from agents.yaml`);
 
           await runInstall();
         },

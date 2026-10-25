@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "[0-9]*.[0-9]*.x"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: make setup
+      - run: make check
+
+      # Build and pack exactly what a release publishes, then install that
+      # package and run it, so a broken build or package layout fails here.
+      - run: make pack
+      - name: Install the packed CLI and run it
+        run: |
+          prefix="$RUNNER_TEMP/agents-config"
+          npm install --global --prefix "$prefix" ./xedinunknown-agents-config-*.tgz
+          "$prefix/bin/agents-config" --help
+          "$prefix/bin/agents-config" config

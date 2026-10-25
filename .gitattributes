@@ -1,0 +1,11 @@
+# Line endings: LF in the repository and in every working tree.
+* text=auto eol=lf
+
+# Generated; collapsed in GitHub diffs.
+package-lock.json linguist-generated
+
+# Development-only files, left out of source archives (git archive, GitHub's
+# "Download ZIP"). The published package is controlled by package.json "files".
+/.github export-ignore
+/.serena export-ignore
+/opencode.json export-ignore

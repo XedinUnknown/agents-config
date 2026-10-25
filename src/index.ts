@@ -1,4 +1,4 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env node
 import { Command } from "commander";
 import { resolve } from "node:path";
 import { bootstrapApp } from "./app.ts";

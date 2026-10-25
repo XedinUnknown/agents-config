@@ -1,9 +1,11 @@
-import { test } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, readlink, access, readdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, readlink, access, readdir, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { syncFiles, flatDirectoryHandler, type FilesPaths, type FilesState } from "./install.ts";
+import { syncFiles, flatDirectoryHandler, installProvider, type FileItems, type FilesPaths, type FilesState } from "./install.ts";
+import { bootstrap, type Provider } from "./di/index.ts";
+import type { TargetHandler } from "./registry.ts";
 import type { DesiredItem, Plan } from "./plan.ts";
 
 const interop: FilesPaths = { skills: ".agents/skills", agents: ".agents/agents" };
@@ -154,9 +156,11 @@ test("syncFiles: leaves a foreign (non-lock-owned) path untouched and reports it
   });
 });
 
-test("syncFiles (link): creates, keeps, and replaces symlinks to the source, and prunes them", async () => {
-  await withTmpDir(async (project) => {
-    const src = await makeSourceSkill(project, "foo", "v1");
+test("syncFiles (link): creates, keeps, and replaces absolute links to a source outside the project, and prunes them", async () => {
+  await withTmpDir(async (root) => {
+    const project = join(root, "project");
+    await mkdir(project);
+    const src = await makeSourceSkill(root, "foo", "v1");
     const lock: FilesState = {};
 
     assert.deepEqual((await syncFiles(project, interop, skillPlan(skill("foo", src)), "link", lock)).added, [FOO]);
@@ -166,7 +170,7 @@ test("syncFiles (link): creates, keeps, and replaces symlinks to the source, and
 
     assert.deepEqual((await syncFiles(project, interop, skillPlan(skill("foo", src)), "link", lock)).unchanged, [FOO]);
 
-    const other = await makeSourceSkill(project, "foo-v2", "v2");
+    const other = await makeSourceSkill(root, "foo-v2", "v2");
     assert.deepEqual((await syncFiles(project, interop, skillPlan(skill("foo", other)), "link", lock)).updated, [FOO]);
     assert.equal(await readlink(join(project, FOO)), other);
 
@@ -209,6 +213,7 @@ test("flatDirectoryHandler uses its own defaults for absent or null paths, and c
       handler.sync({
         projectDir: project,
         targetName: "x",
+        enabled: true,
         options,
         plan: skillPlan(skill("foo", src)),
         installMethod: "copy",
@@ -237,6 +242,7 @@ test("flatDirectoryHandler rejects malformed paths before anything runs, and rep
     const report = await handler.sync({
       projectDir: project,
       targetName: "x",
+      enabled: true,
       options: {},
       plan: skillPlan(skill("foo", src)),
       installMethod: "copy",
@@ -245,5 +251,138 @@ test("flatDirectoryHandler rejects malformed paths before anything runs, and rep
     const path = join(".x", "skills", "foo");
     assert.deepEqual(report.warnings, [`${path} already exists and isn't tracked by agents-config — left untouched`]);
     assert.deepEqual(state, {});
+  });
+});
+
+test("syncFiles (link): a source inside the project gets a relative link, so moving the project keeps it working", async () => {
+  await withTmpDir(async (root) => {
+    const project = join(root, "project");
+    const src = await makeSourceSkill(project, "foo", "v1");
+    const lock: FilesState = {};
+    await syncFiles(project, interop, skillPlan(skill("foo", src)), "link", lock);
+    assert.equal(await readlink(join(project, FOO)), join("..", "..", "src", "foo"));
+
+    // Re-running keeps it unchanged rather than rewriting it.
+    assert.deepEqual((await syncFiles(project, interop, skillPlan(skill("foo", src)), "link", lock)).unchanged, [FOO]);
+
+    const moved = join(root, "moved");
+    await rename(project, moved);
+    assert.equal(await readFile(join(moved, FOO, "SKILL.md"), "utf-8"), "v1");
+  });
+});
+
+describe("interop harness handlers", () => {
+  const container = (extra?: Provider) =>
+    bootstrap(new Map<string, Provider>([["install", installProvider()], ...(extra ? [["module", extra] as const] : [])]));
+  const handler = (name: string) => container().resolve<TargetHandler>(`handler/${name}`);
+
+  /** A project whose .agents/ holds `shared` (skill), `shared-agent.md` and a hand-written `own.md` agent. */
+  async function fixture(project: string) {
+    const sharedSrc = await makeSourceSkill(project, "shared", "shared");
+    const onlySrc = await makeSourceSkill(project, "only-here", "only");
+    await mkdir(join(project, ".agents", "skills", "shared"), { recursive: true });
+    await writeFile(join(project, ".agents", "skills", "shared", "SKILL.md"), "shared");
+    await mkdir(join(project, ".agents", "agents"), { recursive: true });
+    await writeFile(join(project, ".agents", "agents", "shared-agent.md"), "# a");
+    await writeFile(join(project, ".agents", "agents", "own.md"), "# hand-written");
+    await mkdir(join(project, "src"), { recursive: true });
+    const agentSrc = join(project, "src", "shared-agent.md");
+    await writeFile(agentSrc, "# a");
+    const plan: Plan = {
+      skills: [skill("shared", sharedSrc), skill("only-here", onlySrc)],
+      agents: [skill("shared-agent", agentSrc)],
+      replacements: [],
+    };
+    return plan;
+  }
+
+  const ctx = (project: string, plan: Plan, state: object, options: Record<string, unknown> = {}, enabled = true) => ({
+    projectDir: project,
+    targetName: "t",
+    enabled,
+    options,
+    plan,
+    installMethod: "copy" as const,
+    state: state as Record<string, unknown>,
+  });
+
+  test("opencode-interop leaves natively read skills to .agents, installs the rest, and links agents (hand-written too)", async () => {
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      const state = {};
+      const report = await handler("opencode-interop").sync(ctx(project, plan, state));
+
+      assert.deepEqual(report.added.sort(), [
+        join(".opencode", "agents", "own.md"),
+        join(".opencode", "agents", "shared-agent.md"),
+        join(".opencode", "skills", "only-here"),
+      ]);
+      assert.equal(await pathExists(join(project, ".opencode", "skills", "shared")), false);
+      assert.equal(await readlink(join(project, ".opencode", "agents", "own.md")), join("..", "..", ".agents", "agents", "own.md"));
+      assert.equal((await lstat(join(project, ".opencode", "skills", "only-here"))).isSymbolicLink(), false);
+
+      // An interop entry that disappears takes its link with it.
+      await rm(join(project, ".agents", "agents", "own.md"));
+      const second = await handler("opencode-interop").sync(ctx(project, plan, state));
+      assert.deepEqual(second.removed, [join(".opencode", "agents", "own.md")]);
+
+      // Cleanup removes everything it placed.
+      await handler("opencode-interop").sync(ctx(project, { skills: [], agents: [], replacements: [] }, state, {}, false));
+      assert.deepEqual(state, {});
+    });
+  });
+
+  test("claude-interop links every interop entry; with unsupported: install it copies the requested items instead", async () => {
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      const linked = await handler("claude-interop").sync(ctx(project, plan, {}));
+      assert.ok(linked.added.includes(join(".claude", "skills", "shared")));
+      assert.equal((await lstat(join(project, ".claude", "skills", "shared"))).isSymbolicLink(), true);
+      assert.ok(linked.added.includes(join(".claude", "agents", "own.md")));
+
+      await rm(join(project, ".claude"), { recursive: true });
+      const copied = await handler("claude-interop").sync(ctx(project, plan, {}, { unsupported: "install" }));
+      assert.equal((await lstat(join(project, ".claude", "skills", "shared"))).isSymbolicLink(), false);
+      assert.ok(!copied.added.includes(join(".claude", "agents", "own.md")), "hand-written entries aren't copied");
+    });
+  });
+
+  test("codex-interop installs agents by default and refuses unsupported: symlink", async () => {
+    const codex = handler("codex-interop");
+    assert.throws(() => codex.validate?.({ name: "c", handler: "codex-interop", options: { unsupported: "symlink" } }), /isn't possible/);
+    assert.throws(() => codex.validate?.({ name: "c", handler: "codex-interop", options: { unsupported: "maybe" } }), /must be "symlink" or "install"/);
+
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      const report = await codex.sync(ctx(project, plan, {}));
+      assert.deepEqual(report.added.sort(), [join(".codex", "agents", "shared-agent.md"), join(".codex", "skills", "only-here")]);
+    });
+  });
+
+  test("a *-interop handler extends whatever its base handler currently is, and refuses one it can't extend", async () => {
+    const calls: unknown[] = [];
+    const overridden: Provider = {
+      definitions: {
+        // A module replacing the claude handler, e.g. with a converting one.
+        "handler/claude": () => ({
+          sync: async () => ({ added: [], updated: [], removed: [], unchanged: [], warnings: [] }),
+          installItems: async (_ctx: unknown, items: FileItems) => {
+            calls.push(items.skills.map((i) => i.name));
+            return { added: ["custom"], updated: [], removed: [], unchanged: [], warnings: [] };
+          },
+        }),
+        "handler/codex": () => ({ sync: async () => ({ added: [], updated: [], removed: [], unchanged: [], warnings: [] }) }),
+      },
+    };
+    const c = container(overridden);
+
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      const report = await c.resolve<TargetHandler>("handler/claude-interop").sync(ctx(project, plan, {}));
+      assert.deepEqual(report.added, ["custom"]);
+      assert.deepEqual(calls, [["only-here", "shared"]]);
+    });
+
+    assert.throws(() => c.resolve("handler/codex-interop"), /'codex' handler can't be extended by 'codex-interop'/);
   });
 });

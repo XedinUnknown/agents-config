@@ -42,6 +42,9 @@ the project directory). On sync, for the built-in handlers:
   starting empty would turn every previous install into foreign content.
 - Change detection for `install_method: copy` uses a real content hash (sha256
   over sorted file paths + contents), not size/mtime heuristics.
+- Links whose target is inside the project (the `*-interop` mirrors) are
+  relative, so a moved or cloned project keeps working; links into the
+  per-machine dependency cache are absolute.
 
 **Settings layers (`src/layer.ts`)**: `config.yaml` (machine defaults) and
 `agents.yaml` (project) share one schema — `clone_method`, `install_method`,
@@ -50,8 +53,12 @@ replace, maps merge by key. `targets` values: `true` enables a target,
 `false` disables an inherited one, a map adds one or overrides an inherited
 one's settings (merged by key, so an override can change just one path).
 A map may name a `handler`; naming a different handler than the inherited one
-starts its settings fresh. If no layer declares `targets` at all, `interop` is
-enabled. The merge contains only what config says — handler defaults are not
+starts its settings fresh. There is no default target: `install` errors
+until a layer declares `targets` (normally `interop: true` in `config.yaml`;
+`~/.agents` then sets `interop: false`), so why something installs is always
+visible in config. Targets run in first-appearance order (`config.yaml`'s
+first); re-declaring an inherited target changes its settings, not its
+position. The merge contains only what config says — handler defaults are not
 merged in (see Target handlers). Dependencies are keyed by normalized repo
 (`dependencyKey`): a later layer's entry for the same repo replaces the
 earlier one *in place*, distinct repos append.
@@ -91,6 +98,31 @@ that is absent or `null` means "use the handler's default", so `null` in
   (opencode.ai/docs/agents, 2026-10-24), and its agent format differs from
   Claude Code's; agents are copied unchanged, so format conversion, when
   needed, belongs in that handler.
+- `*-interop` built-ins (`claude-interop`, `opencode-interop`,
+  `codex-interop`; `interopVariant`) *extend* the plain handler: each resolves
+  `handler/<harness>` from the container (which must implement
+  `installItems`, a `HarnessHandler`) and only decides which items to hand
+  it, so the plain handler's settings, directories and install method apply,
+  and a module overriding the plain handler changes the variant too. They
+  make a harness see what an
+  earlier target put in `.agents/`: kinds the harness reads natively there
+  are left alone; for the others, `unsupported: symlink` mirrors every
+  `.agents/` entry (installed or hand-written, read from disk at run time —
+  hence the ordering) as links, `unsupported: install` installs the requested
+  items. Requested items missing from `.agents/` are installed normally.
+  Codex agents must be TOML, so `codex-interop` only allows `install`.
+  Handlers get `enabled: false` during cleanup.
+- Harness discovery (verified 2026-10-25): OpenCode 1.18.18 loads agents
+  only from `.opencode/agents` (temp-dir probe with `opencode agent list`;
+  the binary contains no `.agents/agents`). Codex 0.149.0 loads skills from
+  both `.agents/skills` and `.codex/skills` (probe with
+  `codex debug prompt-input`; `.codex/skills` isn't in its docs); its binary
+  has `.codex/agents` and no `.agents/agents`, but no probe got Codex to
+  offer project custom agents, so whether it loads `.codex/agents` TOML in
+  practice is unconfirmed. Claude Code reads only `.claude/` (docs). On this
+  machine, global symlinks (`~/.claude/skills`, `~/.claude/agents`,
+  `~/.config/opencode/agents` → `~/.agents/...`) make the global interop
+  setup reach all three.
 
 Targets are data from the settings layers, not container keys: `di`
 provider override replaces a whole definition, which can't express the
@@ -309,6 +341,14 @@ Design notes not obvious from `--help` (see `install --help` for the
       fixtures (layered deps, collision, target disable cleanup, `remove`,
       legacy-key abort). Known gap: pruning leaves now-empty target
       directories (e.g. `.claude/skills`) behind.
+- [x] No default target, config-order runs, `*-interop` handlers extending
+      their plain handler, relative in-project links. Live-tested
+      2026-10-25 with the real machine config (`interop`, `claude-interop`,
+      `codex-interop`), a real dependency (`anthropics/skills`) and a local
+      probe repo in a scratch project: expected layout, idempotent re-run,
+      Codex lists the probe skill from `.agents/skills`, Claude Code
+      (`claude -p`) sees both the probe skill and agent through the links,
+      and disabling `claude-interop` removes only its links.
 - [ ] Not yet wired into `~/.agents`'s *real* `agents.yaml` / `config.yaml`
       (only isolated copies were run; the real `config.yaml` still uses
       `agents`/`custom_agents` and must be migrated to `targets` first), and the old

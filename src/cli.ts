@@ -56,7 +56,9 @@ export function cliProvider(): Provider {
           console.log(`    skills: ${describeSelection(dep.skills)}`);
           console.log(`    agents: ${describeSelection(dep.agents)}`);
         }
-        console.log(`targets: ${settings.targets.map((t) => t.name).join(", ") || "(none)"}`);
+        console.log(
+          `targets: ${settings.targetsDeclared ? settings.targets.map((t) => t.name).join(", ") || "(none enabled)" : "(none declared)"}`
+        );
       },
 
       "cli/add":

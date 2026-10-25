@@ -22,8 +22,8 @@ npm run agents-config -- --help
 
 ## How It Works
 
-1. Merge settings layers: built-in targets, then `config.yaml` (machine
-   defaults), then the current directory's `agents.yaml`.
+1. Merge settings layers: `config.yaml` (machine defaults), then the
+   current directory's `agents.yaml`.
 2. Clone or update each merged dependency in the configured cache directory.
    Any fetch failure aborts before the filesystem is changed.
 3. Discover skills under `skills/<name>/SKILL.md` and agents under `agents/`,
@@ -98,13 +98,16 @@ Fields:
   inherited target), or a map of settings (add a target or override an
   inherited one's settings). Each target is installed by the handler with its
   name, unless it names another with `handler:`. A setting that is absent or
-  `null` uses the handler's default. If no layer declares `targets`,
-  `interop` is used.
+  `null` uses the handler's default. There is no default target: `install`
+  stops with an error until some layer declares `targets`, normally
+  `interop: true` in `config.yaml`. Targets run in the order they first
+  appear (`config.yaml` first); re-declaring an inherited target doesn't move
+  it.
 - `dependencies`: `repo` accepts `owner/repo`, an HTTPS URL, an SSH URL, or a
   local Git path. `ref` defaults to `main`. `skills` and `agents` accept a
   list, `"*"`/`true` for everything, or `false` for nothing.
 
-Layers merge in the order built-in, `config.yaml`, `agents.yaml`: scalars
+Layers merge in the order `config.yaml`, `agents.yaml`: scalars
 replace, maps merge by key. A dependency in `agents.yaml` replaces a
 `config.yaml` dependency with the same repo in place; other dependencies are
 appended.
@@ -117,9 +120,44 @@ Built-in handlers and their default `paths`:
 | `claude` | `.claude/skills` | `.claude/agents` |
 | `opencode` | `.opencode/skills` | `.opencode/agents` |
 | `codex` | `.codex/skills` | `.codex/agents` |
+| `claude-interop` | `.claude/skills` | `.claude/agents` |
+| `opencode-interop` | `.opencode/skills` | `.opencode/agents` |
+| `codex-interop` | `.codex/skills` | `.codex/agents` |
 
-Agents are copied unchanged; OpenCode's agent format differs from Claude
-Code's. The Codex handler has not been verified against Codex discovery.
+Agents are copied unchanged. OpenCode's agent format differs from Claude
+Code's, and Codex expects TOML agents, so Markdown agents don't work there.
+
+The `*-interop` handlers are for a harness used alongside `interop`, which
+must come earlier in the targets so that `.agents/` is filled first. For each
+kind, if the harness reads `.agents/` natively (OpenCode and Codex skills),
+items already there are left to it. If it doesn't, the `unsupported` setting
+decides: `symlink` (default) links every entry in `.agents/`, installed or
+hand-written, into the harness's directory; `install` installs the requested
+items exactly as the plain handler would (following `install_method`).
+Requested items missing from `.agents/` are installed as the plain handler
+would. Each `*-interop` handler extends its plain handler, so it takes the
+same settings (e.g. `paths`), and a module that overrides the plain handler
+changes both. `codex-interop` defaults to, and only allows, `install`.
+`interop_paths` changes where `.agents/` is looked up.
+
+Links to something inside the project, like these, are relative, so they
+keep working when the project is moved or cloned. Links into the dependency
+cache (`install_method: link`) are absolute.
+
+```yaml
+targets:
+  interop: true
+  claude-interop: true
+```
+
+What each harness reads (official docs; OpenCode and Codex also checked
+against their binaries):
+
+| | Skills | Agents |
+|---|---|---|
+| Claude Code | `.claude/skills` | `.claude/agents` |
+| OpenCode | `.opencode/skills`, `.claude/skills`, `.agents/skills` | `.opencode/agents` |
+| Codex | `.agents/skills`, `.codex/skills` | `.codex/agents` (TOML) |
 
 Custom target example, reusing the `interop` handler with other paths:
 

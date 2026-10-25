@@ -12,25 +12,33 @@ lockfile-based installation model are independent.
 
 ## Installation
 
-Releases are published to GitHub Packages as `@xedinunknown/agents-config`.
-GitHub Packages requires authentication even to install, with a token that
-has the `read:packages` scope (`gh auth refresh -s read:packages` adds it to
-the GitHub CLI's token). Requires Node.js 22 or later.
+Releases are published to npm as `@xedinunknown/agents-config`. It needs
+Node.js 22 or later.
+
+With [mise](https://mise.jdx.dev), which also provides Node.js:
 
 ```bash
-npm config set @xedinunknown:registry https://npm.pkg.github.com
-npm config set //npm.pkg.github.com/:_authToken "$(gh auth token)"
-npm install --global @xedinunknown/agents-config
+mise use -g node@22 'npm:@xedinunknown/agents-config[allow_low_downloads=true]'
 agents-config --help
 ```
 
-Each GitHub Release also has the package tarball attached, which installs the
-same way: `npm install --global ./xedinunknown-agents-config-X.Y.Z.tgz`.
+`allow_low_downloads` is needed while the package has fewer than 1000 weekly
+downloads: mise's npm installer refuses such packages on first install unless
+they're explicitly allowed. The exemption covers only this package.
+
+With npm:
+
+```bash
+npm install --global @xedinunknown/agents-config
+```
+
+Each GitHub Release also has the package tarball attached:
+`npm install --global ./xedinunknown-agents-config-X.Y.Z.tgz`.
 
 To run it from a checkout instead:
 
 ```bash
-npm install
+make setup
 npm run agents-config -- --help
 ```
 
@@ -174,15 +182,17 @@ locations for one invocation.
 ## Development
 
 ```bash
-npm install
-npm run typecheck
-npm test
-npm run build      # compile to dist/, as published
+make setup      # install dependencies
+make check      # typecheck and test
+make dev        # re-run the tests on every change
+make build      # compile to dist/, as published
+make pack       # build the npm package tarball
+make help       # list all targets
 ```
 
-CI runs the typecheck and tests on every push to `master` or a version branch
-(`0.1.x`, ...) and on every pull request. It then packs the package and runs
-the installed CLI.
+CI runs `make check` and `make pack` on every push to `master` or a version
+branch (`0.1.x`, ...) and on every pull request, then installs the packed CLI
+and runs it.
 
 ### Releasing
 
@@ -193,9 +203,16 @@ the installed CLI.
    pre-release to publish under the `next` npm tag instead of `latest`.
 
 The release workflow fails unless the tag is `vX.Y.Z` and `CHANGELOG.md` has a
-`## [X.Y.Z]` section. It runs the typecheck and tests, sets the package
-version from the tag, publishes to GitHub Packages, and attaches the package
-tarball to the release.
+`## [X.Y.Z]` section. It runs `make check`, sets the package version from the
+tag, publishes to npm, and attaches the package tarball to the release.
+
+Publishing authenticates with npm trusted publishing: on npmjs.com, the
+package's settings name `XedinUnknown/agents-config` and the workflow
+`release.yml` as its trusted publisher, so no long-lived token is stored.
+Until that is configured (npm configures it per package, so possibly only
+after a first publish), the workflow uses an npm access token from the
+`NPM_TOKEN` repository secret instead. npm generates no provenance
+attestation while the repository is private.
 
 The tests use local temporary Git repositories and do not require network
 access. Do not test installation against real skill or agent directories until

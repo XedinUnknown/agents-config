@@ -27,9 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fallback to the `agentdeps` configuration directory when no
   `agents-config` one exists.
 - Compiled, installable package `@xedinunknown/agents-config`, published to
-  GitHub Packages when a GitHub Release is published.
+  npm when a GitHub Release is published, and installable with mise.
 - CI running typecheck, tests, and an install of the packed CLI on every push
   and pull request.
+- `make` targets for setup, building, testing, and packing.
 
 ### Removed
 

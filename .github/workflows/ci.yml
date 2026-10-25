@@ -19,14 +19,12 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: make setup
+      - run: make check
 
       # Build and pack exactly what a release publishes, then install that
       # package and run it, so a broken build or package layout fails here.
-      - name: Pack
-        run: npm pack
+      - run: make pack
       - name: Install the packed CLI and run it
         run: |
           prefix="$RUNNER_TEMP/agents-config"

@@ -9,7 +9,7 @@
     "url": "git+https://github.com/XedinUnknown/agents-config.git"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "bin": {
     "agents-config": "dist/index.js"

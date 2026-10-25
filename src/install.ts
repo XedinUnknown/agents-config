@@ -2,8 +2,8 @@
  * The built-in harness handlers — interop, claude, opencode, codex — and the
  * flat copy/link routine they share. Every built-in harness today installs by
  * placing each skill/agent flat into a directory the harness scans. This is
- * the core fix over agentdeps: no _agentdeps_managed/ nesting, so every
- * harness's native flat scanner finds what's installed.
+ * the core fix over agentdeps: no _agentdeps_managed/ nesting, which Claude
+ * Code's one-level scan never finds.
  *
  * Each handler has its own default `paths: { skills, agents }` (relative to
  * the project directory); a target's config overrides either one, and an

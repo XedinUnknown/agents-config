@@ -276,8 +276,7 @@ Publishing authenticates with npm trusted publishing: on npmjs.com, the
 package's settings name `XedinUnknown/agents-config` and the workflow
 `release.yml` as its trusted publisher, allowed to `npm publish`, so no token
 is stored anywhere. The package requires 2FA and refuses tokens for any other
-publishing. npm generates no provenance attestation while the repository is
-private.
+publishing.
 
 The tests use local temporary Git repositories and do not require network
 access. Do not test installation against real skill or agent directories until

@@ -208,11 +208,10 @@ tag, publishes to npm, and attaches the package tarball to the release.
 
 Publishing authenticates with npm trusted publishing: on npmjs.com, the
 package's settings name `XedinUnknown/agents-config` and the workflow
-`release.yml` as its trusted publisher, so no long-lived token is stored.
-Until that is configured (npm configures it per package, so possibly only
-after a first publish), the workflow uses an npm access token from the
-`NPM_TOKEN` repository secret instead. npm generates no provenance
-attestation while the repository is private.
+`release.yml` as its trusted publisher, allowed to `npm publish`, so no token
+is stored anywhere. The package requires 2FA and refuses tokens for any other
+publishing. npm generates no provenance attestation while the repository is
+private.
 
 The tests use local temporary Git repositories and do not require network
 access. Do not test installation against real skill or agent directories until

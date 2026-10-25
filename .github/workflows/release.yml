@@ -4,9 +4,8 @@ name: Release
 # X.Y.Z to the public npm registry and attaches the package tarball to the
 # release.
 #
-# Authentication: npm trusted publishing (OIDC) when the package has this
-# workflow configured as its trusted publisher on npmjs.com; otherwise the
-# NPM_TOKEN repository secret.
+# Authentication: npm trusted publishing (OIDC). The package's settings on
+# npmjs.com name this workflow as its trusted publisher; no token is stored.
 on:
   release:
     types: [published]
@@ -53,8 +52,6 @@ jobs:
 
       - name: Publish to npm
         run: npm publish ./xedinunknown-agents-config-"$VERSION".tgz --access public ${{ github.event.release.prerelease && '--tag next' || '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Attach the tarball to the release
         run: gh release upload "$GITHUB_REF_NAME" ./xedinunknown-agents-config-"$VERSION".tgz

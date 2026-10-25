@@ -64,17 +64,20 @@ program
   .addHelpText(
     "after",
     `
-Settings are layered: built-in targets, then config.yaml (machine defaults),
-then the current directory's agents.yaml. Both files share one schema
+Settings are layered: config.yaml (machine defaults), then the current
+directory's agents.yaml. Both files share one schema
 (clone_method, install_method, targets, dependencies); later layers win.
 
 Targets come from the merged "targets" map: true enables one, false disables
 an inherited one, and a map of settings adds or overrides one. Each target is
 installed by the handler with its name (built-ins: interop, claude, opencode,
 codex) unless it sets "handler:" to another; settings left out or set to null
-use that handler's defaults, e.g. paths: { skills, agents }. If no layer
-declares "targets", interop is used — .agents/skills + .agents/agents
-relative to the current directory.
+use that handler's defaults, e.g. paths: { skills, agents }. There is no
+default target: install stops until a layer declares "targets" — normally
+"interop: true" in config.yaml. Targets run in the order they first appear,
+config.yaml's first, so *-interop targets (claude-interop, opencode-interop,
+codex-interop) go after interop and link or install what their harness
+can't read from .agents/.
 
 Dependencies from both files are merged by repo; a project entry replaces a
 config.yaml entry for the same repo. When two dependencies provide the same

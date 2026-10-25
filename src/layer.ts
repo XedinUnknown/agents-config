@@ -22,8 +22,14 @@
  * nothing to the new one). Defaults are not part of the merge: each handler
  * applies its own to settings that are absent or null. Dependencies are keyed
  * by normalized repo: a later layer's entry for the same repo replaces the earlier one in place,
- * a new repo appends. If no layer declares `targets` at all, the `interop`
- * target is enabled.
+ * a new repo appends. There is no default target: if no layer declares
+ * `targets`, install stops with an error (declare `interop: true` in
+ * config.yaml for the usual default).
+ *
+ * Targets run in the order they first appear: config.yaml's in written
+ * order, then targets new in agents.yaml. Re-declaring an inherited target
+ * changes its settings, not its position. Order matters for `*-interop`
+ * targets, which read what an earlier target put in `.agents/`.
  *
  * The `dependencies` shape is the same as agentdeps' agents.yaml. agentdeps'
  * config.yaml keys `agents`/`custom_agents` are rejected with a migration
@@ -31,7 +37,7 @@
  * to the default target.
  */
 import { parse } from "yaml";
-import { DEFAULT_TARGET, type Target } from "./registry.ts";
+import type { Target } from "./registry.ts";
 
 export type Selection = "*" | string[] | false;
 
@@ -56,7 +62,9 @@ export interface Layer {
 export interface Settings {
   clone_method: "ssh" | "https";
   install_method: "link" | "copy";
-  /** Enabled targets, in definition order. */
+  /** Whether any layer has a `targets` key; install refuses to guess when none does. */
+  targetsDeclared: boolean;
+  /** Enabled targets, in the order they first appear across layers — the order they run in. */
   targets: Target[];
   dependencies: Dependency[];
 }
@@ -219,13 +227,10 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
     }
   }
 
-  if (!targetsDeclared) {
-    targets.set(DEFAULT_TARGET, { enabled: true, handler: DEFAULT_TARGET, options: {} });
-  }
-
   return {
     clone_method: cloneMethod,
     install_method: installMethod,
+    targetsDeclared,
     targets: [...targets]
       .filter(([, state]) => state.enabled)
       .map(([name, state]) => ({ name, handler: state.handler, options: state.options })),

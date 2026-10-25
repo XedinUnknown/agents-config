@@ -69,9 +69,21 @@ test("parseLayer rejects agentdeps' agents/custom_agents keys with a hint to use
   );
 });
 
-test("mergeLayers enables interop when no layer declares targets", () => {
-  assert.deepEqual(names([]), ["interop"]);
-  assert.deepEqual(names([{ clone_method: "ssh" }, {}]), ["interop"]);
+test("mergeLayers has no default target; it reports whether any layer declared targets", () => {
+  assert.deepEqual(mergeLayers([]).targets, []);
+  assert.equal(mergeLayers([{ clone_method: "ssh" }, {}]).targetsDeclared, false);
+  assert.equal(mergeLayers([{ targets: {} }]).targetsDeclared, true);
+});
+
+test("mergeLayers keeps first-appearance order: re-declaring an inherited target doesn't move it", () => {
+  const settings = mergeLayers([
+    { targets: { interop: true, "claude-interop": true } },
+    { targets: { codex: true, interop: { paths: { skills: "s" } } } },
+  ]);
+  assert.deepEqual(
+    settings.targets.map((t) => t.name),
+    ["interop", "claude-interop", "codex"]
+  );
 });
 
 test("mergeLayers: an explicit empty targets map enables nothing", () => {
@@ -88,7 +100,6 @@ test("mergeLayers: a declared targets map replaces the interop fallback rather t
 
 test("mergeLayers: a target uses the handler named like it, with only the settings config gives", () => {
   assert.deepEqual(mergeLayers([{ targets: { claude: true } }]).targets, [{ name: "claude", handler: "claude", options: {} }]);
-  assert.deepEqual(mergeLayers([]).targets, [{ name: "interop", handler: "interop", options: {} }]);
 });
 
 test("mergeLayers: later layers merge a target's settings by key; null is kept for the handler to default", () => {

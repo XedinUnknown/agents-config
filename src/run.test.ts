@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir, lstat, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -438,7 +438,7 @@ test("run/install refuses to forget a target's install when the handler that mad
     await writeConfig(join(root, "config"), "");
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, "agents.yaml"), "dependencies: []\n");
+    await writeFile(join(projectDir, "agents.yaml"), "targets: {}\ndependencies: []\n");
     const lock = {
       version: 2,
       skills: {},
@@ -449,6 +449,47 @@ test("run/install refuses to forget a target's install when the handler that mad
 
     await assert.rejects(() => installFor(root, projectDir)(), /Target 'my-harness' was installed by the 'registry' handler/);
     assert.deepEqual(await readLock(projectDir), lock);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("run/install stops before changing anything when no layer declares targets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-run-no-targets-"));
+  try {
+    await writeConfig(join(root, "config"), "clone_method: https\n");
+    const projectDir = join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(join(projectDir, "agents.yaml"), "dependencies: []\n");
+
+    await assert.rejects(() => installFor(root, projectDir)(), /No targets declared[\s\S]*interop: true/);
+    assert.deepEqual(await readdir(projectDir), ["agents.yaml"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("run/install runs targets in config order, and an inherited target can be switched off per project", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-run-order-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "targets:\n  interop: true\n  claude-interop: true\n");
+    const projectDir = join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    const deps = `dependencies:\n  - repo: ${source}\n    agents: false\n`;
+    await writeFile(join(projectDir, "agents.yaml"), deps);
+
+    await installFor(root, projectDir)();
+    // interop ran first, so claude-interop found demo in .agents/skills and linked it.
+    const link = join(projectDir, ".claude", "skills", "demo");
+    assert.equal((await lstat(link)).isSymbolicLink(), true);
+    assert.equal(await readlink(link), join("..", "..", ".agents", "skills", "demo"));
+
+    // Like ~/.agents: a project that doesn't want the machine-wide targets.
+    await writeFile(join(projectDir, "agents.yaml"), `targets:\n  interop: false\n  claude-interop: false\n${deps}`);
+    await installFor(root, projectDir)();
+    assert.equal(await pathExists(join(projectDir, ".agents", "skills", "demo")), false);
+    assert.equal(await pathExists(link), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

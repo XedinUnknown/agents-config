@@ -30,9 +30,6 @@ export type ItemKind = "skills" | "agents";
 
 export const ITEM_KINDS: readonly ItemKind[] = ["skills", "agents"];
 
-/** Enabled when no layer declares `targets`. */
-export const DEFAULT_TARGET = "interop";
-
 /** A merged, enabled target. */
 export interface Target {
   readonly name: string;
@@ -45,12 +42,14 @@ export interface Target {
 export interface HandlerContext {
   readonly projectDir: string;
   readonly targetName: string;
-  /** The target's settings from config. Empty during cleanup of a target no longer in config. */
-  readonly options: Readonly<Record<string, unknown>>;
   /**
-   * What to have installed after this call. Empty when the target was
-   * disabled or removed: the handler then undoes everything it recorded.
+   * False when the target was disabled, removed from config, or switched to
+   * another handler: the handler must then undo everything it recorded.
    */
+  readonly enabled: boolean;
+  /** The target's settings from config. Empty during cleanup. */
+  readonly options: Readonly<Record<string, unknown>>;
+  /** The requested skills and agents. Empty during cleanup. */
   readonly plan: Plan;
   readonly installMethod: "link" | "copy";
   /**

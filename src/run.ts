@@ -152,6 +152,13 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   }
 
   const settings = mergeLayers([machine, await services.loadManifest(manifestPath)]);
+  if (!settings.targetsDeclared) {
+    throw new Error(
+      "No targets declared in config.yaml or agents.yaml. Declare where to install, e.g. in config.yaml:\n" +
+        "  targets:\n" +
+        "    interop: true"
+    );
+  }
   const lock = await services.loadLock(cwd);
   const runs = planRuns(settings.targets, lock, services);
 
@@ -173,15 +180,16 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
     lock[kind] = Object.fromEntries(plan[kind].map((item) => [item.name, { repo: item.repo, ref: item.ref }]));
   }
 
-  const sync = async (run: TargetRun, requested: Plan): Promise<void> => {
+  const sync = async (run: TargetRun, enabled: boolean): Promise<void> => {
     const record = lock.targets[run.name] ?? { handler: run.handlerName, state: {} };
     lock.targets[run.name] = record;
     try {
       const report = await run.handler.sync({
         projectDir: cwd,
         targetName: run.name,
+        enabled,
         options: run.options,
-        plan: requested,
+        plan: enabled ? plan : NOTHING,
         installMethod: settings.install_method,
         state: record.state,
       });
@@ -193,7 +201,7 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
 
   try {
     for (const run of runs.cleanups) {
-      await sync(run, NOTHING);
+      await sync(run, false);
       const left = lock.targets[run.name];
       if (left && runs.installs.some((i) => i.name === run.name)) {
         // The target switched handlers; the new one starts its own record.
@@ -202,7 +210,7 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
       }
     }
     for (const run of runs.installs) {
-      await sync(run, plan);
+      await sync(run, true);
     }
   } finally {
     await services.saveLock(cwd, lock);

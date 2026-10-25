@@ -137,7 +137,9 @@ Fields:
     from disk and linked by default, so edits show up immediately. With
     `ref` it is read from git at that revision (uncommitted changes
     excluded), pinned to the resolved commit in `agents-lock.json`, and
-    follows `install_method` like a repo.
+    follows `install_method` like a repo. It is read with `git archive`, so
+    files the repository marks `export-ignore` in `.gitattributes` are left
+    out.
   - `skills` and `agents` accept a list, `"*"`/`true` for everything, or
     `false` for nothing. `install_method` overrides the run's install method
     for one dependency.

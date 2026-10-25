@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   symlink`) or installed as the plain handler would (`unsupported: install`).
 - Links to sources inside the project are relative, so they keep working
   when the project moves.
+- `path` dependencies: a folder with the standard `skills/` + `agents/`
+  layout, relative to the project. Read live and linked by default, or with
+  `ref` read from git at that revision and pinned to its commit in
+  `agents-lock.json`. A project's own skills come in via `path: .`.
+- Per-dependency `install_method`.
+- `remove` accepts a repository or a path.
 - Same-name skills or agents from different dependencies resolve to the later
   dependency.
 - Project-level `agents-lock.json` recording each installed name's source and
@@ -43,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make` targets for setup, building, testing, and packing.
 
 ### Removed
+
+- Bare filesystem paths as `repo`. `repo` takes a repository URI
+  (`https://`, `git@host:`, `ssh://`, `file://`) or `owner/repo`; use `path`
+  for a folder.
 
 - `agentdeps`' `agents` and `custom_agents` configuration keys. They are
   rejected with a hint to use `targets`.

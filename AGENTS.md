@@ -12,17 +12,20 @@ discovery bug (see Constraints).
 
 `agentdeps` installs everything into a private `<skills-dir>/_agentdeps_managed/<name>/`
 subfolder so it can safely prune its own writes without touching hand-authored
-skills in the same directory. But every harness (Claude Code, OpenCode, ...) only
-scans the *immediate* children of its configured skills root for `SKILL.md` — one
-level of nesting is enough to make an installed skill invisible. Confirmed
-empirically: skills `agentdeps` installed were never visible to Claude Code or
-OpenCode, both of which only walk flat directories.
+skills in the same directory. But Claude Code only scans the *immediate*
+children of its skills directories for `SKILL.md`, so one level of nesting
+makes an installed skill invisible to it. OpenCode (1.18.18) and Codex
+(0.149.0) scan recursively and do find nested skills, including leftovers such
+as deleted ones that Claude's skill sync moves into `skills/.trash/`.
+Verified 2026-10-25: Claude Code listed the `agentdeps`-installed skills only
+after they were installed flat, while `opencode debug skill` and
+`codex debug prompt-input` listed both the nested and the flat copies.
 
 ## Approach
 
 **Core fix: flat install + a lockfile, not a nested managed directory.** Items
 install directly as top-level children of the real skills/agents directory, so
-every harness's native flat scanner finds them. Ownership is tracked in one
+every harness finds them, including flat-scanning ones like Claude Code. Ownership is tracked in one
 project-level `agents-lock.json`, next to `agents.yaml`, which records the
 final winner per skill/agent name plus one record per target: the handler
 that installed it and that handler's own state (see Target handlers). The
@@ -205,11 +208,10 @@ migrated first.
   shape — no migration required for existing files.
 - Linux/WSL only for now: no macOS/Windows path branching (agentdeps had it;
   deliberately dropped as unneeded complexity for this machine).
-- `codex`'s entry is flagged unverified in its own registry comment: Codex CLI is
-  a closed-source binary with a separate plugin-marketplace system, and whether
-  it actually flat-scans `~/.codex/skills` the way Claude Code/OpenCode do is
-  untested. Confirm empirically before relying on it; if it needs more than a
-  flat file drop, give it its own handler.
+- Codex finds skills in `.agents/skills` and `.codex/skills`, recursively
+  (verified, see Purpose). Whether it loads project agents from `.codex/agents`
+  is still unconfirmed, and they must be TOML, so the `codex` handlers skip
+  agents for now.
 
 ## Features
 

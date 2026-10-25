@@ -358,6 +358,14 @@ Design notes not obvious from `--help` (see `install --help` for the
       Do not clean it up until a real (non-sandboxed) install run against the
       actual `~/.agents` is confirmed working.
 - [ ] `codex` harness entry unverified (see Constraints).
+- [ ] Roadmap: keep installed content out of a project's git automatically —
+      e.g. maintain a marked block in the project's `.gitignore` listing the
+      paths agents-config installed (copies in `.agents/`, links in
+      `.claude/`, `agents-root`'s flat `skills/<name>`), derived from the
+      lock. Until then, projects list them by hand (`~/.agents/.gitignore`
+      does).
+- [ ] Roadmap: convert Markdown agents to Codex's TOML format in the `codex`
+      handler (it skips agents with a warning until then).
 - No interactive `add` picker — not planned. The manifest already declares
   repo + skill/agent selection declaratively; a picker would just re-prompt
   for information the config already has.

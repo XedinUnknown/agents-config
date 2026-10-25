@@ -1,0 +1,57 @@
+name: Release
+
+# Publishing a GitHub Release tagged vX.Y.Z publishes @xedinunknown/agents-config
+# X.Y.Z to GitHub Packages and attaches the package tarball to the release.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write # attach the tarball to the release
+  packages: write # publish to GitHub Packages
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@xedinunknown"
+
+      - name: Check the tag and the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag '$GITHUB_REF_NAME' is not vX.Y.Z"
+            exit 1
+          fi
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Set the package version from the tag
+        run: npm version --no-git-tag-version "$VERSION"
+
+      - name: Pack
+        run: npm pack
+
+      - name: Publish to GitHub Packages
+        run: npm publish ./xedinunknown-agents-config-"$VERSION".tgz ${{ github.event.release.prerelease && '--tag next' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attach the tarball to the release
+        run: gh release upload "$GITHUB_REF_NAME" ./xedinunknown-agents-config-"$VERSION".tgz
+        env:
+          GH_TOKEN: ${{ github.token }}

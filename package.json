@@ -1,14 +1,28 @@
 {
-  "name": "agents-config",
+  "name": "@xedinunknown/agents-config",
   "version": "0.0.0",
-  "private": true,
+  "description": "Declarative dependency manager for AI coding agent skills and subagents",
   "type": "module",
   "packageManager": "npm@9.2.0",
-  "bin": {
-    "agents-config": "./src/index.ts"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XedinUnknown/agents-config.git"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "bin": {
+    "agents-config": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "agents-config": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test 'src/**/*.test.ts'"
   },

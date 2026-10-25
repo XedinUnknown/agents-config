@@ -10,15 +10,31 @@ model and retains manifest compatibility where useful. It is not affiliated
 with, forked from, or derived from `agentdeps`; its implementation and flat
 lockfile-based installation model are independent.
 
-## Status
+## Installation
 
-The core installer is implemented and covered by automated tests, but the CLI
-has not been released yet. Run it from this checkout during development:
+Releases are published to GitHub Packages as `@xedinunknown/agents-config`.
+GitHub Packages requires authentication even to install, with a token that
+has the `read:packages` scope (`gh auth refresh -s read:packages` adds it to
+the GitHub CLI's token). Requires Node.js 22 or later.
+
+```bash
+npm config set @xedinunknown:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken "$(gh auth token)"
+npm install --global @xedinunknown/agents-config
+agents-config --help
+```
+
+Each GitHub Release also has the package tarball attached, which installs the
+same way: `npm install --global ./xedinunknown-agents-config-X.Y.Z.tgz`.
+
+To run it from a checkout instead:
 
 ```bash
 npm install
 npm run agents-config -- --help
 ```
+
+See [CHANGELOG.md](./CHANGELOG.md) for what changed in each release.
 
 ## How It Works
 
@@ -161,7 +177,25 @@ locations for one invocation.
 npm install
 npm run typecheck
 npm test
+npm run build      # compile to dist/, as published
 ```
+
+CI runs the typecheck and tests on every push to `master` or a version branch
+(`0.1.x`, ...) and on every pull request. It then packs the package and runs
+the installed CLI.
+
+### Releasing
+
+1. Move the `## [Unreleased]` entries in `CHANGELOG.md` under a new
+   `## [X.Y.Z] - YYYY-MM-DD` heading, add its compare link at the bottom, and
+   merge that.
+2. Publish a GitHub Release with the tag `vX.Y.Z` on that commit. Mark it as a
+   pre-release to publish under the `next` npm tag instead of `latest`.
+
+The release workflow fails unless the tag is `vX.Y.Z` and `CHANGELOG.md` has a
+`## [X.Y.Z]` section. It runs the typecheck and tests, sets the package
+version from the tag, publishes to GitHub Packages, and attaches the package
+tarball to the release.
 
 The tests use local temporary Git repositories and do not require network
 access. Do not test installation against real skill or agent directories until

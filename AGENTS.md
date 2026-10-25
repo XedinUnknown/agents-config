@@ -110,7 +110,9 @@ that is absent or `null` means "use the handler's default", so `null` in
   `.agents/` entry (installed or hand-written, read from disk at run time —
   hence the ordering) as links, `unsupported: install` installs the requested
   items. Requested items missing from `.agents/` are installed normally.
-  Codex agents must be TOML, so `codex-interop` only allows `install`.
+  Codex agents must be TOML, so `codex-interop` only allows `install`, and
+  the `codex` handler itself skips agents (one warning per run; earlier
+  copies are pruned) via `flatDirectoryHandler`'s `unsupported` kinds.
   Handlers get `enabled: false` during cleanup.
 - Harness discovery (verified 2026-10-25): OpenCode 1.18.18 loads agents
   only from `.opencode/agents` (temp-dir probe with `opencode agent list`;

@@ -124,8 +124,10 @@ Built-in handlers and their default `paths`:
 | `opencode-interop` | `.opencode/skills` | `.opencode/agents` |
 | `codex-interop` | `.codex/skills` | `.codex/agents` |
 
-Agents are copied unchanged. OpenCode's agent format differs from Claude
-Code's, and Codex expects TOML agents, so Markdown agents don't work there.
+Agents are copied unchanged; OpenCode's agent format differs from Claude
+Code's. Codex agents are TOML files, so the `codex` handlers don't install
+agents at all (each run warns how many were skipped) until conversion
+exists.
 
 The `*-interop` handlers are for a harness used alongside `interop`, which
 must come earlier in the targets so that `.agents/` is filled first. For each

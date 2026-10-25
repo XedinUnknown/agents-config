@@ -279,14 +279,29 @@ export interface HarnessHandler extends TargetHandler {
   installItems(ctx: HandlerContext, items: FileItems): Promise<SyncReport>;
 }
 
-/** A handler for a harness that scans flat skills/agents directories. */
-export function flatDirectoryHandler(defaults: FilesPaths): HarnessHandler {
+/**
+ * A handler for a harness that scans flat skills/agents directories.
+ * `unsupported` names kinds this harness can't use as-is, with the reason:
+ * requested items of that kind are skipped with one warning per run, and any
+ * previously installed ones are removed like other undesired items.
+ */
+export function flatDirectoryHandler(
+  defaults: FilesPaths,
+  unsupported: Partial<Record<ItemKind, string>> = {}
+): HarnessHandler {
   const handler: HarnessHandler = {
     validate(target: Target) {
       resolvePaths(target.name, target.options, defaults);
     },
-    async installItems(ctx, items): Promise<SyncReport> {
+    async installItems(ctx, requested): Promise<SyncReport> {
       const paths = resolvePaths(ctx.targetName, ctx.options, defaults);
+      const items: FileItems = { skills: [], agents: [] };
+      const skipped: string[] = [];
+      for (const kind of ITEM_KINDS) {
+        const reason = unsupported[kind];
+        if (reason === undefined) items[kind] = requested[kind];
+        else if (requested[kind].length > 0) skipped.push(`${requested[kind].length} ${kind} not installed: ${reason}`);
+      }
       const r = await syncFiles(ctx.projectDir, paths, items, ctx.installMethod, ctx.state as FilesState);
       return {
         added: r.added,
@@ -296,6 +311,7 @@ export function flatDirectoryHandler(defaults: FilesPaths): HarnessHandler {
         warnings: [
           ...r.skippedForeign.map((p) => `${p} already exists and isn't tracked by agents-config — left untouched`),
           ...r.keptModified.map((p) => `${p} is no longer desired but was modified since install — left in place`),
+          ...skipped,
         ],
       };
     },
@@ -443,8 +459,9 @@ function resolveInteropPaths(targetName: string, options: Readonly<Record<string
  * - codex: Codex 0.149.0 loads skills from `.codex/skills` as well as
  *   `.agents/skills` (probe with `codex debug prompt-input`, 2026-10-25;
  *   `.codex/skills` isn't in its docs). Agents are TOML files in
- *   `.codex/agents` per its docs; Markdown agents copied there won't load,
- *   and no probe confirmed project agents load at all.
+ *   `.codex/agents` per its docs, so Markdown agents aren't installed (with a
+ *   warning) until conversion exists; no probe confirmed project agents load
+ *   at all.
  */
 export function installProvider(): Provider {
   return {
@@ -452,7 +469,11 @@ export function installProvider(): Provider {
       "handler/interop": () => flatDirectoryHandler({ skills: ".agents/skills", agents: ".agents/agents" }),
       "handler/claude": () => flatDirectoryHandler({ skills: ".claude/skills", agents: ".claude/agents" }),
       "handler/opencode": () => flatDirectoryHandler({ skills: ".opencode/skills", agents: ".opencode/agents" }),
-      "handler/codex": () => flatDirectoryHandler({ skills: ".codex/skills", agents: ".codex/agents" }),
+      "handler/codex": () =>
+        flatDirectoryHandler(
+          { skills: ".codex/skills", agents: ".codex/agents" },
+          { agents: "Codex agents are TOML files; converting Markdown agents isn't implemented" }
+        ),
       // Each *-interop handler extends whatever `handler/<harness>` currently
       // resolves to, so a module overriding e.g. `claude` changes both.
       "handler/claude-interop": (c: Container) =>

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncFiles, flatDirectoryHandler, installProvider, type FileItems, type FilesPaths, type FilesState } from "./install.ts";
 import { bootstrap, type Provider } from "./di/index.ts";
+import { hashPath } from "./hash.ts";
 import type { TargetHandler } from "./registry.ts";
 import type { DesiredItem, Plan } from "./plan.ts";
 
@@ -355,7 +356,26 @@ describe("interop harness handlers", () => {
     await withTmpDir(async (project) => {
       const plan = await fixture(project);
       const report = await codex.sync(ctx(project, plan, {}));
-      assert.deepEqual(report.added.sort(), [join(".codex", "agents", "shared-agent.md"), join(".codex", "skills", "only-here")]);
+      assert.deepEqual(report.added, [join(".codex", "skills", "only-here")]);
+      assert.deepEqual(report.warnings, ["1 agents not installed: Codex agents are TOML files; converting Markdown agents isn't implemented"]);
+      assert.equal(await pathExists(join(project, ".codex", "agents")), false);
+    });
+  });
+
+  test("codex removes Markdown agents an earlier version installed, and skips requested ones", async () => {
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      const old = join(".codex", "agents", "shared-agent.md");
+      await mkdir(join(project, ".codex", "agents"), { recursive: true });
+      await writeFile(join(project, old), "# a");
+      const state = {
+        installs: { [old]: { kind: "agents", name: "shared-agent", method: "copy", contentHash: await hashPath(join(project, old)), installedAt: "t", updatedAt: "t" } },
+      };
+
+      const report = await handler("codex").sync(ctx(project, plan, state));
+      assert.deepEqual(report.removed, [old]);
+      assert.equal(await pathExists(join(project, old)), false);
+      assert.equal(report.warnings.length, 1);
     });
   });
 

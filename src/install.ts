@@ -58,9 +58,7 @@ export interface SyncResult {
 }
 
 /** An item to place; `method` overrides the run's install method for this item. */
-export interface FileItem extends DesiredItem {
-  method?: "copy" | "link";
-}
+export type FileItem = DesiredItem;
 
 export interface FileItems {
   skills: readonly FileItem[];
@@ -353,7 +351,7 @@ async function interopEntries(dir: string, kind: ItemKind): Promise<Map<string, 
     const file = st.isFile();
     if (file ? kind === "skills" || !fileName.endsWith(".md") : !st.isDirectory()) continue;
     const name = file ? fileName.replace(/\.md$/, "") : fileName;
-    entries.set(fileName, { name, sourcePath, repo: "(interop)", ref: "", method: "link" });
+    entries.set(fileName, { name, sourcePath, origin: { path: dir }, method: "link" });
   }
   return entries;
 }

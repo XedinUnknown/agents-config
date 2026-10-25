@@ -8,7 +8,7 @@
 import { Document, parseDocument } from "yaml";
 import { mkdir, readFile, writeFile, access } from "node:fs/promises";
 import { dirname } from "node:path";
-import { parseLayer, type Dependency, type Layer } from "./layer.ts";
+import { isPathDependency, parseLayer, type Dependency, type Layer } from "./layer.ts";
 import type { Provider } from "./di/index.ts";
 
 export async function manifestExists(path: string): Promise<boolean> {
@@ -25,10 +25,11 @@ export async function loadManifest(path: string): Promise<Layer> {
 }
 
 function serializeDependency(dep: Dependency): Record<string, unknown> {
-  const entry: Record<string, unknown> = { repo: dep.repo };
-  if (dep.ref !== "main") entry["ref"] = dep.ref;
+  const entry: Record<string, unknown> = isPathDependency(dep) ? { path: dep.path } : { repo: dep.repo };
+  if (isPathDependency(dep) ? dep.ref !== undefined : dep.ref !== "main") entry["ref"] = dep.ref;
   if (dep.skills !== "*") entry["skills"] = dep.skills;
   if (dep.agents !== "*") entry["agents"] = dep.agents;
+  if (dep.install_method !== undefined) entry["install_method"] = dep.install_method;
   return entry;
 }
 

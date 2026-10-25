@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir, lstat, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -60,7 +60,7 @@ test("run/install syncs a project dependency into .agents/ via the default inter
 
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: ${sourceRepo}\n    ref: main\n`);
+    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: file://${sourceRepo}\n    ref: main\n`);
 
     const configDir = join(root, "config");
     await writeConfig(configDir, "clone_method: https\ninstall_method: copy\ntargets:\n  interop: true\n");
@@ -107,7 +107,7 @@ test("run/install leaves a hand-authored file with the same name untouched (fore
     const projectDir = join(root, "project");
     await mkdir(join(projectDir, ".agents", "skills", "demo-skill"), { recursive: true });
     await writeFile(join(projectDir, ".agents", "skills", "demo-skill", "SKILL.md"), "# hand-authored");
-    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: ${sourceRepo}\n    ref: main\n    agents: false\n`);
+    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: file://${sourceRepo}\n    ref: main\n    agents: false\n`);
 
     const configDir = join(root, "config");
     await writeConfig(configDir, "clone_method: https\ninstall_method: copy\ntargets:\n  interop: true\n");
@@ -147,7 +147,7 @@ test("a custom harness with bare skills/agents paths installs relative to whatev
     await mkdir(agentsRootDir, { recursive: true });
     await writeFile(
       join(agentsRootDir, "agents.yaml"),
-      `dependencies:\n  - repo: ${sourceRepo}\n    ref: main\n    agents: false\n`
+      `dependencies:\n  - repo: file://${sourceRepo}\n    ref: main\n    agents: false\n`
     );
 
     const configDir = join(root, "config");
@@ -209,11 +209,11 @@ test("run/install merges config.yaml defaults with agents.yaml, the later depend
 
     await writeConfig(
       join(root, "config"),
-      `targets:\n  claude: true\ndependencies:\n  - repo: ${defaults}\n    agents: false\n`
+      `targets:\n  claude: true\ndependencies:\n  - repo: file://${defaults}\n    agents: false\n`
     );
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: ${project}\n    agents: false\n`);
+    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: file://${project}\n    agents: false\n`);
 
     await installFor(root, projectDir)();
 
@@ -224,7 +224,7 @@ test("run/install merges config.yaml defaults with agents.yaml, the later depend
     assert.equal(await pathExists(join(projectDir, ".agents")), false);
 
     const lock = JSON.parse(await readFile(join(projectDir, "agents-lock.json"), "utf-8"));
-    assert.deepEqual(lock.skills.shared, { repo: project, ref: "main" });
+    assert.deepEqual(lock.skills.shared, { repo: `file://${project}`, ref: "main" });
     assert.deepEqual(lock.targets.claude.handler, "claude");
     assert.deepEqual(Object.keys(lock.targets.claude.state.installs).sort(), [join(".claude", "skills", "only-default"), join(".claude", "skills", "shared")]);
     // No per-directory locks any more.
@@ -241,7 +241,7 @@ test("run/install: disabling a target in agents.yaml cleans up what it installed
     await writeConfig(join(root, "config"), "targets:\n  interop: true\n  claude: true\n");
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    const deps = `dependencies:\n  - repo: ${source}\n    agents: false\n`;
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
     await writeFile(join(projectDir, "agents.yaml"), deps);
 
     const install = installFor(root, projectDir);
@@ -279,6 +279,8 @@ test("run/install aborts before syncing or saving the lock when a dependency can
     () =>
       runInstall({ targets: { interop: true } }, "/tmp/project", {
         ensureRepo: async () => ({ success: false, path: "/tmp/cache", error: "network unavailable" }),
+        snapshotPath: async () => ({ success: false, path: "", commit: "", error: "unused" }),
+        isDirectory: async () => true,
         discoverSkills: async () => [],
         discoverAgents: async () => [],
         filterItems: () => ({ selected: [], missing: [] }),
@@ -353,7 +355,7 @@ test("a module adds a handler: it gets the requested skills and its settings, ow
     await writeConfig(join(root, "config"), "");
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    const deps = `dependencies:\n  - repo: ${source}\n    agents: false\n`;
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
     await writeFile(join(projectDir, "agents.yaml"), `targets:\n  my-harness:\n    handler: registry\n    file: registry.txt\n${deps}`);
 
     const calls: Array<{ target: string; skills: string[]; state: unknown }> = [];
@@ -384,7 +386,7 @@ test("run/install: renaming a target or switching its handler undoes the old ins
     await writeConfig(join(root, "config"), "");
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    const deps = `dependencies:\n  - repo: ${source}\n    agents: false\n`;
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
     const calls: Array<{ target: string; skills: string[]; state: unknown }> = [];
     const install = installWithModule(root, projectDir, registryHandler(calls));
 
@@ -476,7 +478,7 @@ test("run/install runs targets in config order, and an inherited target can be s
     await writeConfig(join(root, "config"), "targets:\n  interop: true\n  claude-interop: true\n");
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
-    const deps = `dependencies:\n  - repo: ${source}\n    agents: false\n`;
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
     await writeFile(join(projectDir, "agents.yaml"), deps);
 
     await installFor(root, projectDir)();
@@ -493,4 +495,92 @@ test("run/install runs targets in config order, and an inherited target can be s
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe("path dependencies", () => {
+  /** A project that is its own skill package: skills/ and agents/ at its root, in git. */
+  async function packageProject(root: string): Promise<string> {
+    const projectDir = join(root, "project");
+    await mkdir(join(projectDir, "skills", "own"), { recursive: true });
+    await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# v1");
+    await mkdir(join(projectDir, "agents"), { recursive: true });
+    await writeFile(join(projectDir, "agents", "helper.md"), "# helper v1");
+    await git(["init", "-b", "main"], projectDir);
+    await git(["add", "."], projectDir);
+    await git(["commit", "-m", "v1"], projectDir);
+    await git(["tag", "v1"], projectDir);
+    return projectDir;
+  }
+
+  test("path: . installs the project's own skills live, as relative links, and records the path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agents-config-path-live-"));
+    try {
+      const projectDir = await packageProject(root);
+      await writeConfig(join(root, "config"), "targets:\n  interop: true\n  claude-interop: true\n");
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n");
+
+      await installFor(root, projectDir)();
+
+      const installed = join(projectDir, ".agents", "skills", "own");
+      assert.equal(await readlink(installed), join("..", "..", "skills", "own"));
+      assert.equal(await readlink(join(projectDir, ".claude", "skills", "own")), join("..", "..", ".agents", "skills", "own"));
+      assert.equal(await readlink(join(projectDir, ".agents", "agents", "helper.md")), join("..", "..", "agents", "helper.md"));
+
+      // Live: an uncommitted edit shows up without reinstalling.
+      await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# edited");
+      assert.equal(await readFile(join(projectDir, ".claude", "skills", "own", "SKILL.md"), "utf-8"), "# edited");
+      assert.deepEqual((await readLock(projectDir)).skills.own, { path: "." });
+
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies: []\n");
+      await installFor(root, projectDir)();
+      assert.equal(await pathExists(installed), false);
+      assert.equal(await pathExists(join(projectDir, "skills", "own", "SKILL.md")), true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("path: . with ref installs the project's own skills as they were at that revision, pinned to its commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agents-config-path-ref-"));
+    try {
+      const projectDir = await packageProject(root);
+      const v1 = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: projectDir })).stdout.trim();
+      await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# v2");
+      await git(["commit", "-am", "v2"], projectDir);
+      await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# uncommitted");
+      await writeConfig(join(root, "config"), "targets:\n  interop: true\n");
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    ref: v1\n");
+
+      await installFor(root, projectDir)();
+
+      const installed = join(projectDir, ".agents", "skills", "own");
+      assert.equal((await lstat(installed)).isSymbolicLink(), false, "follows install_method (copy), not live");
+      assert.equal(await readFile(join(installed, "SKILL.md"), "utf-8"), "# v1");
+      assert.deepEqual((await readLock(projectDir)).skills.own, { path: ".", ref: "v1", commit: v1 });
+
+      // Moving the ref updates the install.
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    ref: main\n");
+      await installFor(root, projectDir)();
+      assert.equal(await readFile(join(installed, "SKILL.md"), "utf-8"), "# v2");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a path dependency can be copied instead of linked, and a missing folder aborts before any change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agents-config-path-copy-"));
+    try {
+      const projectDir = await packageProject(root);
+      await writeConfig(join(root, "config"), "targets:\n  interop: true\n");
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    install_method: copy\n");
+      await installFor(root, projectDir)();
+      assert.equal((await lstat(join(projectDir, ".agents", "skills", "own"))).isSymbolicLink(), false);
+
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: missing\n");
+      await assert.rejects(() => installFor(root, projectDir)(), /path:missing: .*missing is not a directory/);
+      assert.equal(await pathExists(join(projectDir, ".agents", "skills", "own")), true, "nothing was pruned");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

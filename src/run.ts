@@ -8,11 +8,12 @@
  * longer available to undo it) before anything on disk changes: a failed fetch must
  * never look like a removed dependency and prune what it previously installed.
  */
-import { join } from "node:path";
-import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn } from "./cache.ts";
-import { mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
+import { join, resolve } from "node:path";
+import { stat } from "node:fs/promises";
+import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn, type SnapshotPathFn } from "./cache.ts";
+import { dependencyLabel, isPathDependency, mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
 import type { DiscoveredItem } from "./discovery.ts";
-import { buildPlan, type Plan, type ResolvedDep } from "./plan.ts";
+import { buildPlan, type Origin, type Plan, type ResolvedDep } from "./plan.ts";
 import type { LockFile } from "./lockfile.ts";
 import { ITEM_KINDS, handlerKey, type SyncReport, type Target, type TargetHandler } from "./registry.ts";
 import type { Container, Provider } from "./di/index.ts";
@@ -25,6 +26,8 @@ type FilterItemsFn = (
 /** Everything `runInstall` needs from outside itself, resolved once by `run/install`'s factory. */
 export interface RunServices {
   ensureRepo: EnsureRepoFn;
+  snapshotPath: SnapshotPathFn;
+  isDirectory: (path: string) => Promise<boolean>;
   discoverSkills: (repoPath: string) => Promise<DiscoveredItem[]>;
   discoverAgents: (repoPath: string) => Promise<DiscoveredItem[]>;
   filterItems: FilterItemsFn;
@@ -35,44 +38,76 @@ export interface RunServices {
   getHandler: (name: string) => TargetHandler | undefined;
 }
 
+/** Where a dependency's files are on disk, and what to record about where they came from. */
+async function fetchDep(
+  dep: Dependency,
+  cwd: string,
+  cloneMethod: "ssh" | "https",
+  services: RunServices
+): Promise<{ dir: string; origin: Origin; method?: "copy" | "link" }> {
+  const label = dependencyLabel(dep);
+  const override = dep.install_method !== undefined ? { method: dep.install_method } : {};
+
+  if (!isPathDependency(dep)) {
+    const url = resolveRepoUrl(dep.repo, cloneMethod);
+    console.log(`  fetching ${label} (${dep.ref})`);
+    const cached = await services.ensureRepo(url, dep.ref, deriveCacheKey(dep.repo, dep.ref));
+    if (!cached.success) throw new Error(`Failed to cache ${label}: ${cached.error ?? "unknown error"}`);
+    return { dir: cached.path, origin: { repo: dep.repo, ref: dep.ref }, ...override };
+  }
+
+  const folder = resolve(cwd, dep.path);
+  if (dep.ref === undefined) {
+    if (!(await services.isDirectory(folder))) throw new Error(`${label}: ${folder} is not a directory`);
+    // A live folder is linked by default, so edits show up immediately.
+    return { dir: folder, origin: { path: dep.path }, method: dep.install_method ?? "link" };
+  }
+
+  console.log(`  reading ${label} at ${dep.ref}`);
+  const snapshot = await services.snapshotPath(folder, dep.ref);
+  if (!snapshot.success) throw new Error(`Failed to read ${label} at ${dep.ref}: ${snapshot.error ?? "unknown error"}`);
+  return { dir: snapshot.path, origin: { path: dep.path, ref: dep.ref, commit: snapshot.commit }, ...override };
+}
+
 async function resolveDeps(
   deps: readonly Dependency[],
+  cwd: string,
   cloneMethod: "ssh" | "https",
   services: RunServices
 ): Promise<ResolvedDep[]> {
   const resolved: ResolvedDep[] = [];
 
   for (const dep of deps) {
-    const url = resolveRepoUrl(dep.repo, cloneMethod);
-    const cacheKey = deriveCacheKey(dep.repo, dep.ref);
-    console.log(`  fetching ${dep.repo} (${dep.ref})`);
-    const cached = await services.ensureRepo(url, dep.ref, cacheKey);
-    if (!cached.success) {
-      throw new Error(`Failed to cache ${dep.repo}: ${cached.error ?? "unknown error"}`);
-    }
+    const label = dependencyLabel(dep);
+    const { dir, origin, method } = await fetchDep(dep, cwd, cloneMethod, services);
 
     const [discoveredSkills, discoveredAgents] = await Promise.all([
-      services.discoverSkills(cached.path),
-      services.discoverAgents(cached.path),
+      services.discoverSkills(dir),
+      services.discoverAgents(dir),
     ]);
 
     const skillResult = services.filterItems(discoveredSkills, dep.skills);
     const agentResult = services.filterItems(discoveredAgents, dep.agents);
 
     if (dep.skills !== false && discoveredSkills.length === 0) {
-      console.warn(`  ⚠ no skills found in ${dep.repo} (no skills/ directory or no SKILL.md files)`);
+      console.warn(`  ⚠ no skills found in ${label} (no skills/ directory or no SKILL.md files)`);
     }
     if (skillResult.missing.length > 0) {
-      console.warn(`  ⚠ skills not found in ${dep.repo}: ${skillResult.missing.join(", ")}`);
+      console.warn(`  ⚠ skills not found in ${label}: ${skillResult.missing.join(", ")}`);
     }
     if (dep.agents !== false && discoveredAgents.length === 0) {
-      console.warn(`  ⚠ no agents found in ${dep.repo} (no agents/ directory)`);
+      console.warn(`  ⚠ no agents found in ${label} (no agents/ directory)`);
     }
     if (agentResult.missing.length > 0) {
-      console.warn(`  ⚠ agents not found in ${dep.repo}: ${agentResult.missing.join(", ")}`);
+      console.warn(`  ⚠ agents not found in ${label}: ${agentResult.missing.join(", ")}`);
     }
 
-    resolved.push({ repo: dep.repo, ref: dep.ref, skills: skillResult.selected, agents: agentResult.selected });
+    resolved.push({
+      origin,
+      ...(method !== undefined ? { method } : {}),
+      skills: skillResult.selected,
+      agents: agentResult.selected,
+    });
   }
 
   return resolved;
@@ -170,14 +205,14 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   // Still run the (possibly empty) sync below even with no dependencies: a
   // manifest that just had its last dependency removed must prune whatever
   // was previously installed, not leave it stranded.
-  const resolved = await resolveDeps(settings.dependencies, settings.clone_method, services);
+  const resolved = await resolveDeps(settings.dependencies, cwd, settings.clone_method, services);
   const plan = buildPlan(resolved);
   for (const r of plan.replacements) {
     console.log(`    ${r.kind}/${r.name}: ${r.by} replaces ${r.replaced} (later dependency wins)`);
   }
 
   for (const kind of ITEM_KINDS) {
-    lock[kind] = Object.fromEntries(plan[kind].map((item) => [item.name, { repo: item.repo, ref: item.ref }]));
+    lock[kind] = Object.fromEntries(plan[kind].map((item) => [item.name, item.origin]));
   }
 
   const sync = async (run: TargetRun, enabled: boolean): Promise<void> => {
@@ -234,6 +269,14 @@ export function runProvider(): Provider {
 
         const services: RunServices = {
           ensureRepo: c.resolve<EnsureRepoFn>("repo/ensure"),
+          snapshotPath: c.resolve<SnapshotPathFn>("repo/snapshot"),
+          isDirectory: async (path) => {
+            try {
+              return (await stat(path)).isDirectory();
+            } catch {
+              return false;
+            }
+          },
           discoverSkills: c.resolve("discovery/skills"),
           discoverAgents: c.resolve("discovery/agents"),
           filterItems: c.resolve("discovery/filter"),

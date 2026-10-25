@@ -11,14 +11,25 @@
 import type { DiscoveredItem } from "./discovery.ts";
 import { ITEM_KINDS, type ItemKind } from "./registry.ts";
 
+/** Where an item came from, as recorded in agents-lock.json. */
+export type Origin =
+  | { repo: string; ref: string }
+  | { path: string }
+  | { path: string; ref: string; commit: string };
+
+export function originLabel(origin: Origin): string {
+  return "repo" in origin ? origin.repo : `path:${origin.path}`;
+}
+
 export interface DesiredItem extends DiscoveredItem {
-  repo: string;
-  ref: string;
+  origin: Origin;
+  /** Overrides the run's install method for this item. */
+  method?: "copy" | "link";
 }
 
 export interface ResolvedDep {
-  repo: string;
-  ref: string;
+  origin: Origin;
+  method?: "copy" | "link";
   skills: DiscoveredItem[];
   agents: DiscoveredItem[];
 }
@@ -46,11 +57,20 @@ export function buildPlan(resolved: readonly ResolvedDep[]): Plan {
       for (const item of dep[kind]) {
         const earlier = winners.get(item.name);
         if (earlier) {
-          plan.replacements.push({ kind, name: item.name, replaced: earlier.repo, by: dep.repo });
+          plan.replacements.push({
+            kind,
+            name: item.name,
+            replaced: originLabel(earlier.origin),
+            by: originLabel(dep.origin),
+          });
           // Re-insert so the winner's position reflects where it was declared.
           winners.delete(item.name);
         }
-        winners.set(item.name, { ...item, repo: dep.repo, ref: dep.ref });
+        winners.set(item.name, {
+          ...item,
+          origin: dep.origin,
+          ...(dep.method !== undefined ? { method: dep.method } : {}),
+        });
       }
     }
     plan[kind] = [...winners.values()];

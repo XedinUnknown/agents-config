@@ -127,14 +127,40 @@ Fields:
   `interop: true` in `config.yaml`. Targets run in the order they first
   appear (`config.yaml` first); re-declaring an inherited target doesn't move
   it.
-- `dependencies`: `repo` accepts `owner/repo`, an HTTPS URL, an SSH URL, or a
-  local Git path. `ref` defaults to `main`. `skills` and `agents` accept a
-  list, `"*"`/`true` for everything, or `false` for nothing.
+- `dependencies`: each has exactly one of `repo` or `path`.
+  - `repo` is a repository URI (`https://`, `git@host:`, `ssh://`,
+    `file://`) or `owner/repo` GitHub shorthand. `ref` defaults to `main`.
+    A bare filesystem path is rejected: use `path`, or `file://` for a
+    repository.
+  - `path` is a folder with the standard `skills/` + `agents/` layout,
+    relative to the project (or absolute). Without `ref` it is read live
+    from disk and linked by default, so edits show up immediately. With
+    `ref` it is read from git at that revision (uncommitted changes
+    excluded), pinned to the resolved commit in `agents-lock.json`, and
+    follows `install_method` like a repo. It is read with `git archive`, so
+    files the repository marks `export-ignore` in `.gitattributes` are left
+    out.
+  - `skills` and `agents` accept a list, `"*"`/`true` for everything, or
+    `false` for nothing. `install_method` overrides the run's install method
+    for one dependency.
+
+A project's own skills belong in its `skills/` and `agents/`, the same layout
+as any repository installed from, and are installed like any dependency:
+
+```yaml
+dependencies:
+  - path: .          # live; or add `ref: v1.2` to pin a revision
+  - repo: anthropics/skills
+    skills: [skill-creator]
+```
+
+Install folders (`.agents/skills`, `.claude/skills`, ...) then contain only
+installed content and can be ignored as a whole.
 
 Layers merge in the order `config.yaml`, `agents.yaml`: scalars
 replace, maps merge by key. A dependency in `agents.yaml` replaces a
-`config.yaml` dependency with the same repo in place; other dependencies are
-appended.
+`config.yaml` dependency with the same repo or path in place; other
+dependencies are appended.
 
 Built-in handlers and their default `paths`:
 

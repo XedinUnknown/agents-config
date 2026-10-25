@@ -58,7 +58,7 @@ test("parseLayer rejects invalid values, naming the source file", () => {
   assert.throws(() => parseLayer("targets:\n  foo: [a]\n", "x.yaml"), /target 'foo' must be/);
   assert.throws(() => parseLayer("targets:\n  foo:\n    handler: 1\n", "x.yaml"), /handler must be a non-empty string/);
   assert.throws(() => parseLayer("dependencies: not-a-list\n", "x.yaml"), /must be an array/);
-  assert.throws(() => parseLayer("dependencies:\n  - ref: main\n", "x.yaml"), /missing required 'repo'/);
+  assert.throws(() => parseLayer("dependencies:\n  - ref: main\n", "x.yaml"), /exactly one of 'repo' or 'path'/);
 });
 
 test("parseLayer rejects agentdeps' agents/custom_agents keys with a hint to use targets", () => {
@@ -153,7 +153,7 @@ test("mergeLayers: a later entry for the same repo replaces the earlier one in p
     },
   ]);
   assert.deepEqual(
-    settings.dependencies.map((d) => [d.repo, d.ref]),
+    settings.dependencies.map((d) => ["repo" in d ? d.repo : d.path, d.ref]),
     [
       ["Owner/A.git", "v2"],
       ["owner/b", "main"],
@@ -162,6 +162,37 @@ test("mergeLayers: a later entry for the same repo replaces the earlier one in p
   );
 });
 
-test("dependencyKey ignores case and a trailing .git", () => {
-  assert.equal(dependencyKey("Owner/Repo.git"), dependencyKey("owner/repo"));
+test("dependencyKey ignores case and a trailing .git for repos, normalizes paths, and keeps the two apart", () => {
+  const repo = (r: string) => dependencyKey({ repo: r, ref: "main", skills: "*", agents: "*" });
+  const path = (p: string) => dependencyKey({ path: p, skills: "*", agents: "*" });
+  assert.equal(repo("Owner/Repo.git"), repo("owner/repo"));
+  assert.equal(path("./"), path("."));
+  assert.equal(path("packages/x/"), path("./packages/x"));
+  assert.notEqual(path("owner/repo"), repo("owner/repo"));
+});
+
+test("parseLayer: repo accepts URIs and owner/repo only, and rejects bare paths with a hint", () => {
+  for (const repo of ["owner/repo", "https://github.com/o/r.git", "git@github.com:o/r.git", "file:///srv/git/r", "ssh://git@host/o/r"]) {
+    assert.equal(parseLayer(`dependencies:\n  - repo: ${repo}\n`, "x.yaml").dependencies?.length, 1, repo);
+  }
+  for (const repo of [".", "./skills", "../other", "/home/owner/repo", "~/repo"]) {
+    assert.throws(
+      () => parseLayer(`dependencies:\n  - repo: "${repo}"\n`, "x.yaml"),
+      /not a repository URI or owner\/repo\. Use 'path:' for a folder, or a file:\/\/ URI/,
+      repo
+    );
+  }
+});
+
+test("parseLayer: path dependencies, optional ref and install_method; exactly one of repo/path", () => {
+  assert.deepEqual(
+    parseLayer("dependencies:\n  - path: .\n  - path: ../lib\n    ref: v1\n    install_method: copy\n", "x.yaml").dependencies,
+    [
+      { path: ".", skills: "*", agents: "*" },
+      { path: "../lib", ref: "v1", skills: "*", agents: "*", install_method: "copy" },
+    ]
+  );
+  assert.throws(() => parseLayer("dependencies:\n  - path: .\n    repo: o/r\n", "x.yaml"), /exactly one of 'repo' or 'path'/);
+  assert.throws(() => parseLayer("dependencies:\n  - skills: false\n", "x.yaml"), /exactly one of 'repo' or 'path'/);
+  assert.throws(() => parseLayer("dependencies:\n  - path: .\n    install_method: move\n", "x.yaml"), /install_method must be/);
 });

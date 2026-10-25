@@ -1,0 +1,27 @@
+{
+  "name": "agents-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@9.2.0",
+  "bin": {
+    "agents-config": "./src/index.ts"
+  },
+  "scripts": {
+    "agents-config": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test 'src/**/*.test.ts'"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}

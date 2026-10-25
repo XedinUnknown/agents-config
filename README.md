@@ -22,35 +22,32 @@ npm run agents-config -- --help
 
 ## How It Works
 
-1. Read the current directory's `agents.yaml`.
-2. Clone or update each declared repository in the configured cache directory.
-3. Discover skills under `skills/<name>/SKILL.md` and agents under `agents/`.
-4. Apply the skill and agent selections declared in `agents.yaml`.
-5. Send that already-selected desired set to each harness adapter configured in
-   `config.yaml`; adapters decide where and how to install it, not what the
-   manifest selects.
-6. Record managed top-level names in `agents-lock.json` inside each target
-   directory.
+1. Merge settings layers: built-in targets, then `config.yaml` (machine
+   defaults), then the current directory's `agents.yaml`.
+2. Clone or update each merged dependency in the configured cache directory.
+   Any fetch failure aborts before the filesystem is changed.
+3. Discover skills under `skills/<name>/SKILL.md` and agents under `agents/`,
+   and apply each dependency's selections.
+4. Build the plan: when two dependencies provide the same skill or agent name,
+   the later one wins and only the winner is installed.
+5. Call each target's handler to install the winners however its harness
+   needs (the built-in handlers copy or link them flat into the harness's
+   directories), and record the winners and each target's install in
+   `agents-lock.json` next to `agents.yaml`.
 
 Managed content is installed flat, not under a private nested directory. On
-subsequent runs, `agents-config` updates or removes only lockfile-owned names.
-An existing name that is not lockfile-owned is left untouched and reported.
-Same-name dependencies are reported as collisions; the first declaration wins.
+subsequent runs, `agents-config` updates or removes only lock-owned paths.
+An existing path that is not lock-owned is left untouched and reported.
 
-Pruning compares the current desired top-level names with the names owned by
-the target directory's lockfile. A lock-owned name absent from the desired set
-is removed from disk and from the lockfile. This occurs when a dependency or
-selection is removed from `agents.yaml`. Fetch failures abort before any target
-is synchronized, and names not owned by the lockfile are never pruned.
+A lock-owned path absent from the current plan is removed: this happens when
+a dependency or selection is removed, when a later dependency takes over a
+name, or when a target is disabled or its paths change. A lock-owned copy
+modified on disk since installation is left in place with a warning instead
+of being removed.
 
-Only currently configured harnesses are synchronized. Removing a harness from
-`config.yaml` does not revisit its former target directory, so it cannot prune
-that directory. Prune its managed entries before removing the harness from the
-configuration.
-
-With `install_method: copy`, managed files are restored when missing or locally
-modified. With `install_method: link`, targets are symlinked to the cached
-checkout.
+With `install_method: copy`, desired managed files are restored when missing
+or locally modified. With `install_method: link`, targets are symlinked to the
+cached checkout.
 
 ## Architecture
 
@@ -61,8 +58,10 @@ through the resulting application container.
 Application services are keyed lazy definitions composed in deterministic
 order: platform, config, repository cache, discovery, manifest, lockfile,
 hashing, installation, orchestration, CLI commands, and final host overrides.
-Harnesses use a nested container because custom harness key names are only
-known after `config.yaml` has been loaded.
+Targets are data merged from the settings layers. Target handlers are
+container definitions (`handler/<name>`), so a module passed to
+`bootstrapApp({ modules })` can add a handler for a new harness, with its own
+defaults, or override a built-in one.
 
 The composition implementation in `src/di/` is a vendored copy of the
 unpublished `@uny/di` package from the sibling
@@ -73,56 +72,16 @@ provenance comments; upstream changes must currently be synchronized manually.
 
 ## Configuration
 
-Tool configuration lives at
-`$XDG_CONFIG_HOME/agents-config/config.yaml` (normally
-`~/.config/agents-config/config.yaml`):
+`config.yaml` (machine defaults, at `$XDG_CONFIG_HOME/agents-config/config.yaml`,
+normally `~/.config/agents-config/config.yaml`) and each project's
+`agents.yaml` share one schema. Both are optional layers; `install` runs only
+in a directory that has an `agents.yaml`.
 
 ```yaml
 clone_method: https
 install_method: copy
-agents:
-  - interop
-```
-
-Fields:
-
-- `clone_method`: `https` or `ssh`.
-- `install_method`: `copy` or `link`.
-- `agents`: harness names to target. If omitted, defaults to `interop`.
-- `custom_agents`: custom or overriding harness paths relative to the current
-  working directory.
-
-Built-in harnesses:
-
-| Name | Skills | Agents |
-|---|---|---|
-| `interop` | `.agents/skills` | `.agents/agents` |
-| `claude` | `.claude/skills` | `.claude/agents` |
-| `opencode` | `.agents/skills` | `.agents/agents` |
-| `codex` | `.codex/skills` | `.codex/agents` |
-
-The Codex flat-file adapter has not been verified against Codex discovery.
-
-Custom harness example:
-
-```yaml
-custom_agents:
-  agents-root:
-    project_skills: skills
-    project_agents: agents
-agents:
-  - agents-root
-```
-
-All target paths are relative to the directory where the command runs. There
-is no separate global mode. A machine-wide configuration directory is handled
-as an ordinary project with appropriate relative custom paths.
-
-## Manifest
-
-Each managed project declares dependencies in `agents.yaml`:
-
-```yaml
+targets:
+  claude: true
 dependencies:
   - repo: Dhii/containers
     ref: 0.3.x
@@ -131,17 +90,64 @@ dependencies:
     agents: false
 ```
 
-`repo` accepts `owner/repo`, an HTTPS URL, an SSH URL, or a local Git path.
-`ref` defaults to `main`. `skills` and `agents` accept a list, `"*"`/`true`
-for everything, or `false` for nothing.
+Fields:
+
+- `clone_method`: `https` (default) or `ssh`.
+- `install_method`: `copy` (default) or `link`.
+- `targets`: a map of target name to `true` (enable), `false` (disable an
+  inherited target), or a map of settings (add a target or override an
+  inherited one's settings). Each target is installed by the handler with its
+  name, unless it names another with `handler:`. A setting that is absent or
+  `null` uses the handler's default. If no layer declares `targets`,
+  `interop` is used.
+- `dependencies`: `repo` accepts `owner/repo`, an HTTPS URL, an SSH URL, or a
+  local Git path. `ref` defaults to `main`. `skills` and `agents` accept a
+  list, `"*"`/`true` for everything, or `false` for nothing.
+
+Layers merge in the order built-in, `config.yaml`, `agents.yaml`: scalars
+replace, maps merge by key. A dependency in `agents.yaml` replaces a
+`config.yaml` dependency with the same repo in place; other dependencies are
+appended.
+
+Built-in handlers and their default `paths`:
+
+| Handler | `paths.skills` | `paths.agents` |
+|---|---|---|
+| `interop` | `.agents/skills` | `.agents/agents` |
+| `claude` | `.claude/skills` | `.claude/agents` |
+| `opencode` | `.opencode/skills` | `.opencode/agents` |
+| `codex` | `.codex/skills` | `.codex/agents` |
+
+Agents are copied unchanged; OpenCode's agent format differs from Claude
+Code's. The Codex handler has not been verified against Codex discovery.
+
+Custom target example, reusing the `interop` handler with other paths:
+
+```yaml
+targets:
+  agents-root:
+    handler: interop
+    paths:
+      skills: skills
+      agents: agents
+```
+
+All target paths are relative to the directory where the command runs. There
+is no separate global mode. A machine-wide configuration directory is handled
+as an ordinary project with appropriate relative custom paths.
+
+The `dependencies` shape is compatible with `agentdeps`' `agents.yaml`. Its
+`config.yaml` keys `agents` and `custom_agents` are rejected with a hint to
+use `targets`; when only `$XDG_CONFIG_HOME/agentdeps/config.yaml` exists, it
+is read as a fallback, so it must be migrated first.
 
 ## Commands
 
 ```text
-agents-config install          Sync dependencies from agents.yaml
+agents-config install          Sync merged dependencies into the enabled targets
 agents-config add <repo>       Add or update a dependency, then sync
 agents-config remove <repo>    Remove a dependency, then prune its installs
-agents-config list             List configured dependencies and targets
+agents-config list             List merged dependencies (with their source) and targets
 agents-config config           Print resolved config and cache paths
 ```
 

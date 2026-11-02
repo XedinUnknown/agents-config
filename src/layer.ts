@@ -15,8 +15,7 @@
  *       ref: main
  *       skills: "*" | [names] | true | false
  *       agents: "*" | [names] | true | false
- *     - path: .                    # a folder with skills/ + agents/, relative to
- *       ref: v1.2                  # the project; optional ref pins it to a revision
+ *     - path: .                    # a live folder with skills/ + agents/, relative to the project
  *       install_method: copy       # optional per-dependency override
  *
  * Merge order is config.yaml -> agents.yaml: scalars replace, maps merge by
@@ -60,13 +59,10 @@ export interface RepoDependency extends DependencyBase {
 
 /**
  * A folder with the standard `skills/` + `agents/` layout, relative to the
- * project directory (or absolute). Without `ref` it is read live from disk
- * and linked by default; with `ref` it is read from git at that revision,
- * which pins it.
+ * project directory (or absolute), read live from disk and linked by default.
  */
 export interface PathDependency extends DependencyBase {
   path: string;
-  ref?: string;
 }
 
 export type Dependency = RepoDependency | PathDependency;
@@ -140,6 +136,12 @@ function normalizeDependency(raw: unknown, index: number, source: string): Depen
   if (hasRepo === hasPath) {
     throw new Error(`${where} needs exactly one of 'repo' or 'path'`);
   }
+  if (hasPath && "ref" in dep) {
+    throw new Error(
+      `${where}: 'ref' is not supported for path dependencies; paths are always live. ` +
+        "Use 'repo: file:///absolute/path/to/repository' with 'ref' for a versioned local repository."
+    );
+  }
   if (dep["ref"] !== undefined && (typeof dep["ref"] !== "string" || dep["ref"] === "")) {
     throw new Error(`${where}: 'ref' must be a non-empty string`);
   }
@@ -157,7 +159,7 @@ function normalizeDependency(raw: unknown, index: number, source: string): Depen
     if (typeof dep["path"] !== "string" || dep["path"] === "") {
       throw new Error(`${where}: 'path' must be a non-empty string`);
     }
-    return { path: dep["path"], ...(dep["ref"] !== undefined ? { ref: dep["ref"] as string } : {}), ...base };
+    return { path: dep["path"], ...base };
   }
 
   const repo = dep["repo"];

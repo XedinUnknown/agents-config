@@ -14,8 +14,7 @@ import { ITEM_KINDS, type ItemKind } from "./registry.ts";
 /** Where an item came from, as recorded in agents-lock.json. */
 export type Origin =
   | { repo: string; ref: string; commit?: string }
-  | { path: string }
-  | { path: string; ref: string; commit: string };
+  | { path: string };
 
 export function originLabel(origin: Origin): string {
   return "repo" in origin ? origin.repo : `path:${origin.path}`;

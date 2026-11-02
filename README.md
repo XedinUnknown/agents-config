@@ -41,8 +41,9 @@ agents-lock.json              <- tracks sources and installed paths
 
 ## Quick Start
 
-Requires **Node.js 22+**, **npm**, and **Git**. Linux/WSL is the currently
-supported platform.
+Requires **Node.js 22+** and **npm**. **Git** is only required for Git repository
+dependencies; local path-only installs do not require Git. Linux/WSL is the
+currently supported platform.
 
 ### 1. Install the CLI
 

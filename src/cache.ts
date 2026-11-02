@@ -4,7 +4,7 @@
  * independently.
  */
 import { mkdir, rm, rename, stat as fsStat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -145,72 +145,52 @@ export async function ensureRepo(url: string, ref: string, cacheKey: string, cac
 
 export type EnsureRepoFn = (url: string, ref: string, cacheKey: string) => Promise<RepoResult>;
 
-export interface SnapshotResult {
-  success: boolean;
-  /** The folder's contents at the revision. */
-  path: string;
-  /** The commit `ref` resolved to. */
+export interface SnapshotResult extends RepoResult {
   commit: string;
-  error?: string;
 }
 
-export type SnapshotPathFn = (folder: string, ref: string) => Promise<SnapshotResult>;
+export type SnapshotRepoFn = (repoPath: string, ref: string) => Promise<SnapshotResult>;
 
 async function gitOutput(args: string[], cwd: string): Promise<string> {
   const { stdout } = await execFileAsync("git", args, { cwd });
   return stdout.trim();
 }
 
-/** `git archive <commit> -- <sub>` extracted into `dest`, without a shell. */
-function archiveInto(top: string, commit: string, sub: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const git = spawn("git", ["archive", "--format=tar", commit, ...(sub === "" ? [] : ["--", sub])], { cwd: top });
-    const tar = spawn("tar", ["-x", "-C", dest]);
-    let stderr = "";
-    git.stderr.on("data", (d) => (stderr += d));
-    tar.stderr.on("data", (d) => (stderr += d));
-    git.stdout.pipe(tar.stdin);
-    const exited = (p: ReturnType<typeof spawn>) => new Promise<number | null>((r) => p.on("close", r));
-    Promise.all([exited(git), exited(tar)]).then(([g, t]) =>
-      g === 0 && t === 0 ? resolve() : reject(new Error(stderr.trim() || `git archive exited ${g}, tar ${t}`))
-    );
-  });
-}
-
-/**
- * A folder inside a git repository, as it was at `ref` — for a `path`
- * dependency with a `ref`. The commit's tree is extracted once into the cache
- * (keyed by repository and commit, so it never changes afterwards), and the
- * folder within it is returned. Uncommitted changes are, by design, not
- * included.
- */
-export async function snapshotPath(folder: string, ref: string, cacheDir: string): Promise<SnapshotResult> {
-  let top: string;
-  let commit: string;
+/** Extract a repository commit once, keeping linked installs independent of moving refs. */
+export async function snapshotRepo(repoPath: string, ref: string, cacheDir: string): Promise<SnapshotResult> {
+  let commit = "";
+  let partial: string | undefined;
   try {
-    top = await gitOutput(["rev-parse", "--show-toplevel"], folder);
-    commit = await gitOutput(["rev-parse", "--verify", `${ref}^{commit}`], top);
-  } catch (err) {
-    const stderr = err && typeof err === "object" && "stderr" in err ? String((err as { stderr: unknown }).stderr) : String(err);
-    return { success: false, path: folder, commit: "", error: stderr.trim() };
-  }
-  const sub = relative(top, folder);
-  const repoId = createHash("sha256").update(top).digest("hex").slice(0, 12);
-  const snapshot = join(cacheDir, `path-${repoId}-${commit}`);
-
-  if (!(await dirExists(snapshot))) {
-    const partial = `${snapshot}.partial-${process.pid}`;
-    try {
+    commit = await gitOutput(["rev-parse", "--verify", `${ref}^{commit}`], repoPath);
+    const repoId = createHash("sha256").update(repoPath).digest("hex").slice(0, 12);
+    const snapshot = join(cacheDir, `repo-${repoId}-${commit}`);
+    if (!(await dirExists(snapshot))) {
+      partial = `${snapshot}.partial-${process.pid}`;
       await rm(partial, { recursive: true, force: true });
       await mkdir(partial, { recursive: true });
-      await archiveInto(top, commit, sub, partial);
+      const dest = partial;
+      await new Promise<void>((resolve, reject) => {
+        const git = spawn("git", ["archive", "--format=tar", commit], { cwd: repoPath });
+        const tar = spawn("tar", ["-x", "-C", dest]);
+        let stderr = "";
+        git.stderr.on("data", (data) => (stderr += data));
+        tar.stderr.on("data", (data) => (stderr += data));
+        git.on("error", reject);
+        tar.on("error", reject);
+        git.stdout.pipe(tar.stdin);
+        const exited = (process: ReturnType<typeof spawn>) =>
+          new Promise<number | null>((done) => process.on("close", done));
+        Promise.all([exited(git), exited(tar)]).then(([g, t]) =>
+          g === 0 && t === 0 ? resolve() : reject(new Error(stderr.trim() || `git archive exited ${g}, tar ${t}`))
+        );
+      });
       await rename(partial, snapshot);
-    } catch (err) {
-      await rm(partial, { recursive: true, force: true });
-      return { success: false, path: folder, commit, error: err instanceof Error ? err.message : String(err) };
     }
+    return { success: true, path: snapshot, commit };
+  } catch (error) {
+    if (partial !== undefined) await rm(partial, { recursive: true, force: true });
+    return { success: false, path: repoPath, commit, error: error instanceof Error ? error.message : String(error) };
   }
-  return { success: true, path: join(snapshot, sub), commit };
 }
 
 /**
@@ -219,19 +199,23 @@ export async function snapshotPath(folder: string, ref: string, cacheDir: string
  *  - repo/gitAvailable: `checkGitAvailable()`'s result, cached once resolved.
  *  - repo/ensure: `ensureRepo` bound to `config/cacheDir`, so callers never
  *    need to know or pass a cache directory themselves.
- *  - repo/snapshot: `snapshotPath` bound to `config/cacheDir`.
  */
 export function repoProvider(): Provider {
   return {
     definitions: {
       "repo/gitAvailable": () => checkGitAvailable(),
+      "repo/snapshot": (c: Container): SnapshotRepoFn => {
+        const cacheDir = c.resolve<string>("config/cacheDir");
+        return (repoPath, ref) => snapshotRepo(repoPath, ref, cacheDir);
+      },
       "repo/ensure": (c: Container): EnsureRepoFn => {
         const cacheDir = c.resolve<string>("config/cacheDir");
-        return (url, ref, cacheKey) => ensureRepo(url, ref, cacheKey, cacheDir);
-      },
-      "repo/snapshot": (c: Container): SnapshotPathFn => {
-        const cacheDir = c.resolve<string>("config/cacheDir");
-        return (folder, ref) => snapshotPath(folder, ref, cacheDir);
+        return async (url, ref, cacheKey) => {
+          if (!(await c.resolve<Promise<boolean>>("repo/gitAvailable"))) {
+            throw new Error("git is not installed or not in PATH.");
+          }
+          return ensureRepo(url, ref, cacheKey, cacheDir);
+        };
       },
     },
   };

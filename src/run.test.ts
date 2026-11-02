@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { bootstrapApp } from "./app.ts";
 import { runInstall } from "./run.ts";
 import { emptyLock } from "./lockfile.ts";
@@ -287,7 +288,7 @@ test("run/install reports counts instead of item names, preserves warnings, and 
   };
   const install = () => runInstall({ targets: { interop: true } }, "/tmp/project", {
     ensureRepo: async () => { throw new Error("unused"); },
-    snapshotPath: async () => { throw new Error("unused"); },
+    snapshotRepo: async () => { throw new Error("unused"); },
     isDirectory: async () => true,
     discoverSkills: async () => [],
     discoverAgents: async () => [],
@@ -327,7 +328,7 @@ test("run/install aborts before syncing or saving the lock when a dependency can
     () =>
       runInstall({ targets: { interop: true } }, "/tmp/project", {
         ensureRepo: async () => ({ success: false, path: "/tmp/cache", error: "network unavailable" }),
-        snapshotPath: async () => ({ success: false, path: "", commit: "", error: "unused" }),
+        snapshotRepo: async () => { throw new Error("unused"); },
         isDirectory: async () => true,
         discoverSkills: async () => [],
         discoverAgents: async () => [],
@@ -546,17 +547,13 @@ test("run/install runs targets in config order, and an inherited target can be s
 });
 
 describe("path dependencies", () => {
-  /** A project that is its own skill package: skills/ and agents/ at its root, in git. */
+  /** A non-Git project that is its own skill package. */
   async function packageProject(root: string): Promise<string> {
     const projectDir = join(root, "project");
     await mkdir(join(projectDir, "skills", "own"), { recursive: true });
     await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# v1");
     await mkdir(join(projectDir, "agents"), { recursive: true });
     await writeFile(join(projectDir, "agents", "helper.md"), "# helper v1");
-    await git(["init", "-b", "main"], projectDir);
-    await git(["add", "."], projectDir);
-    await git(["commit", "-m", "v1"], projectDir);
-    await git(["tag", "v1"], projectDir);
     return projectDir;
   }
 
@@ -574,7 +571,7 @@ describe("path dependencies", () => {
       assert.equal(await readlink(join(projectDir, ".claude", "skills", "own")), join("..", "..", ".agents", "skills", "own"));
       assert.equal(await readlink(join(projectDir, ".agents", "agents", "helper.md")), join("..", "..", "agents", "helper.md"));
 
-      // Live: an uncommitted edit shows up without reinstalling.
+      // Live: an edit shows up without reinstalling.
       await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# edited");
       assert.equal(await readFile(join(projectDir, ".claude", "skills", "own", "SKILL.md"), "utf-8"), "# edited");
       assert.deepEqual((await readLock(projectDir)).skills.own, { path: "." });
@@ -588,28 +585,22 @@ describe("path dependencies", () => {
     }
   });
 
-  test("path: . with ref installs the project's own skills as they were at that revision, pinned to its commit", async () => {
+  test("a path ref is rejected before install without pruning existing installs or changing the lock", async () => {
     const root = await mkdtemp(join(tmpdir(), "agents-config-path-ref-"));
     try {
       const projectDir = await packageProject(root);
-      const v1 = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: projectDir })).stdout.trim();
-      await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# v2");
-      await git(["commit", "-am", "v2"], projectDir);
-      await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# uncommitted");
       await writeConfig(join(root, "config"), "targets:\n  interop: true\n");
-      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    ref: v1\n");
-
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n");
       await installFor(root, projectDir)();
-
       const installed = join(projectDir, ".agents", "skills", "own");
-      assert.equal((await lstat(installed)).isSymbolicLink(), false, "follows install_method (copy), not live");
-      assert.equal(await readFile(join(installed, "SKILL.md"), "utf-8"), "# v1");
-      assert.deepEqual((await readLock(projectDir)).skills.own, { path: ".", ref: "v1", commit: v1 });
-
-      // Moving the ref updates the install.
-      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    ref: main\n");
-      await installFor(root, projectDir, "update")();
-      assert.equal(await readFile(join(installed, "SKILL.md"), "utf-8"), "# v2");
+      const lock = await readFile(join(projectDir, "agents-lock.json"), "utf-8");
+      for (const ref of ["v1", '""', "null"]) {
+        await writeFile(join(projectDir, "agents.yaml"), `targets:\n  interop: false\ndependencies:\n  - path: .\n    ref: ${ref}\n`);
+        await assert.rejects(() => installFor(root, projectDir)(), /'ref' is not supported for path dependencies/);
+        assert.equal(await readFile(join(installed, "SKILL.md"), "utf-8"), "# v1");
+        assert.equal((await lstat(installed)).isSymbolicLink(), true);
+        assert.equal(await readFile(join(projectDir, "agents-lock.json"), "utf-8"), lock);
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -623,10 +614,47 @@ describe("path dependencies", () => {
       await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    install_method: copy\n");
       await installFor(root, projectDir)();
       assert.equal((await lstat(join(projectDir, ".agents", "skills", "own"))).isSymbolicLink(), false);
+      await writeFile(join(projectDir, "skills", "own", "SKILL.md"), "# edited");
+      assert.equal(await readFile(join(projectDir, ".agents", "skills", "own", "SKILL.md"), "utf-8"), "# v1");
+      await installFor(root, projectDir)();
+      assert.equal(await readFile(join(projectDir, ".agents", "skills", "own", "SKILL.md"), "utf-8"), "# edited");
 
       await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: missing\n");
       await assert.rejects(() => installFor(root, projectDir, "update")(), /path:missing: .*missing is not a directory/);
       assert.equal(await pathExists(join(projectDir, ".agents", "skills", "own")), true, "nothing was pruned");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the CLI installs live paths without Git, but rejects repo fetches before pruning", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agents-config-path-no-git-"));
+    try {
+      const projectDir = await packageProject(root);
+      const configDir = join(root, "config");
+      const cacheDir = join(root, "cache");
+      await writeConfig(configDir, "targets:\n  interop: true\n");
+      const cli = (command: string) => execFileAsync(process.execPath, [
+        "--import", import.meta.resolve("tsx"), fileURLToPath(new URL("./index.ts", import.meta.url)),
+        "--config", configDir, "--cache-dir", cacheDir, command,
+      ], { cwd: projectDir, env: { ...process.env, PATH: "" } });
+
+      for (const method of ["link", "copy"]) {
+        await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - path: .\n    install_method: ${method}\n`);
+        await cli("update");
+        await cli("install");
+        assert.equal((await lstat(join(projectDir, ".agents", "skills", "own"))).isSymbolicLink(), method === "link");
+      }
+      assert.match((await cli("list")).stdout, /path:\. \(live, from agents.yaml\)/);
+      await cli("config");
+      assert.equal(await pathExists(cacheDir), false, "live paths never populate the repo cache");
+
+      const lock = await readFile(join(projectDir, "agents-lock.json"), "utf-8");
+      await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - repo: file:///unused\n");
+      await assert.rejects(() => cli("update"), /git is not installed or not in PATH/);
+      assert.equal(await readFile(join(projectDir, ".agents", "skills", "own", "SKILL.md"), "utf-8"), "# v1");
+      assert.equal(await readFile(join(projectDir, "agents-lock.json"), "utf-8"), lock);
+      assert.equal(await pathExists(cacheDir), false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

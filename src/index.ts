@@ -38,7 +38,7 @@ Run 'agents-config config' to see the resolved paths for the current invocation.
 // Bootstrap Pattern expects a host to hold its own composed container.
 let container: Container;
 
-program.hook("preAction", async (thisCommand) => {
+program.hook("preAction", (thisCommand) => {
   const { config, cacheDir } = thisCommand.opts<{ config?: string; cacheDir?: string }>();
 
   container = bootstrapApp({
@@ -47,11 +47,6 @@ program.hook("preAction", async (thisCommand) => {
     ...(config !== undefined ? { configDirOverride: resolve(config) } : {}),
     ...(cacheDir !== undefined ? { cacheDirOverride: resolve(cacheDir) } : {}),
   });
-
-  if (!(await container.resolve<Promise<boolean>>("repo/gitAvailable"))) {
-    console.error("git is not installed or not in PATH.");
-    process.exit(1);
-  }
 });
 
 program

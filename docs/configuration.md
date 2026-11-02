@@ -102,9 +102,11 @@ dependencies:
     agents: false
 ```
 
-`path` resolves relative to the project, or accepts an absolute path. Without
-`ref`, it reads the directory live and links by default, so edits are visible
-immediately. It pins nothing independently of the project's own version control.
+`path` resolves relative to the project, or accepts an absolute path. It always
+reads the directory live and links by default, so edits are visible immediately.
+Set `install_method: copy` on the dependency to copy instead. Paths do not require
+Git or a Git repository and do not accept `ref`. They pin nothing independently
+of the project's own version control.
 
 The source directories are distinct from destinations such as `.agents/skills`
 and `.claude/skills`. Those destinations hold installed copies or links managed
@@ -112,11 +114,17 @@ by the tool. Keeping source separate lets you ignore generated installs without
 ignoring the files you author. This convention applies to local dependencies;
 you don't need source directories when installing only third-party skills.
 
-With `ref`, the tool reads the requested Git revision rather than the live
-directory. It uses `git archive` to extract that revision into the cache without
-switching your working tree or including uncommitted edits. It records the
-resolved commit and follows `install_method` like a repository. Files marked
-`export-ignore` in `.gitattributes` are excluded from the snapshot.
+For a versioned local Git repository, use `repo` with a `file://` URI instead:
+
+```yaml
+dependencies:
+  - repo: file:///absolute/path/to/repository
+    ref: v1.2
+```
+
+This uses the repository cache like any other `repo` dependency and does not
+include uncommitted working-tree edits. Existing `path` dependencies with `ref`
+must either remove `ref` to become live or switch to a repository URI.
 
 Ignore generated install directories as a whole while tracking source skills,
 `agents.yaml`, and `agents-lock.json`. Automatic `.gitignore` maintenance is
@@ -204,7 +212,8 @@ then installs. Commit the lockfile for reproducible Git dependencies.
 Changes to dependency declarations in either settings layer require `update`;
 `install` aborts with a hint instead of silently changing resolutions. Target
 settings and the run's install method can change without updating dependencies.
-Live `path` dependencies remain live; paths with a `ref` use the locked commit.
+Live `path` dependencies remain live and reject `ref`; use a `file://` repository
+dependency for a versioned local source.
 Older locks without dependency resolutions require one `update`, preserving
 their existing ownership records. `add` and `remove` run a full update after
 editing the manifest, so they may also advance other dependencies.

@@ -17,8 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dependency declaration changes and older ownership-only locks require `update`.
 - Git-backed installs use immutable cached snapshots, including link installs.
   Live path dependencies remain live. `add` and `remove` now update before installing.
+- `path` dependencies are always live directories, linked by default, with an
+  optional copy override. They no longer accept `ref` or require Git. Use a
+  `repo: file:///absolute/path/to/repository` dependency with `ref` for a
+  versioned local repository.
 - Installation output summarizes added, updated, and removed items by count per
   target instead of listing every skill and agent. Warnings remain detailed.
+
+### Removed
+
+- Git revision snapshots for `path` dependencies, their cache service, and
+  `git archive`/`tar` extraction.
 
 ## [0.1.0-beta.1] - 2026-10-25
 

@@ -151,13 +151,12 @@ test("updating a second link-installed project cannot mutate the first project's
   assert.equal(await installed(second), "# new");
 });
 
-test("a moving path ref stays pinned on install and advances only on update", async (t) => {
+test("a versioned local repository stays pinned on install and advances only on update", async (t) => {
   const f = await fixture(t);
-  const project = await f.project("project",
-    "dependencies:\n  - path: ../source\n    ref: main\n    agents: false\n");
+  const project = await f.project();
   await f.run(project, "install");
   assert.deepEqual((await lockAt(project)).dependencies, [{
-    dependency: { path: "../source", ref: "main", skills: "*", agents: false },
+    dependency: { repo: f.repo, ref: "main", skills: "*", agents: false },
     commit: f.initial,
   }]);
   const before = await unchangedState(project);
@@ -170,7 +169,7 @@ test("a moving path ref stays pinned on install and advances only on update", as
   assert.equal(await installed(project), "# new");
   assert.equal((await lockAt(project)).dependencies?.[0]?.commit, next);
   assert.deepEqual((await lockAt(project)).skills.demo,
-    { path: "../source", ref: "main", commit: next });
+    { repo: f.repo, ref: "main", commit: next });
 });
 
 test("dependency drift rejects install without changing the lock or installed content", async (t) => {

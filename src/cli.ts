@@ -10,6 +10,7 @@ import {
   dependencyKey,
   dependencyLabel,
   isRepoUri,
+  isPathDependency,
   mergeLayers,
   pathKey,
   repoKey,
@@ -65,7 +66,7 @@ export function cliProvider(): Provider {
         const projectKeys = new Set((project.dependencies ?? []).map(dependencyKey));
         for (const dep of settings.dependencies) {
           const source = projectKeys.has(dependencyKey(dep)) ? "agents.yaml" : "config.yaml";
-          const ref = dep.ref !== undefined ? `ref: ${dep.ref}` : "live";
+          const ref = isPathDependency(dep) ? "live" : `ref: ${dep.ref}`;
           console.log(`  ${dependencyLabel(dep)} (${ref}, from ${source})`);
           console.log(`    skills: ${describeSelection(dep.skills)}`);
           console.log(`    agents: ${describeSelection(dep.agents)}`);

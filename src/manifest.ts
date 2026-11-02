@@ -26,7 +26,7 @@ export async function loadManifest(path: string): Promise<Layer> {
 
 function serializeDependency(dep: Dependency): Record<string, unknown> {
   const entry: Record<string, unknown> = isPathDependency(dep) ? { path: dep.path } : { repo: dep.repo };
-  if (isPathDependency(dep) ? dep.ref !== undefined : dep.ref !== "main") entry["ref"] = dep.ref;
+  if (!isPathDependency(dep) && dep.ref !== "main") entry["ref"] = dep.ref;
   if (dep.skills !== "*") entry["skills"] = dep.skills;
   if (dep.agents !== "*") entry["agents"] = dep.agents;
   if (dep.install_method !== undefined) entry["install_method"] = dep.install_method;

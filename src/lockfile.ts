@@ -6,7 +6,7 @@
  *
  *  - `skills`/`agents`: the final winner per name after the last-wins plan
  *    (see plan.ts) — where each installed name came from: `{repo, ref, commit}`,
- *    `{path}` for a live folder, or `{path, ref, commit}` for a pinned one.
+ *    or `{path}` for a live folder.
  *  - `dependencies`: merged declarations and resolved commits, including
  *    non-winning sources. Absent in older ownership-only version-2 locks.
  *  - `targets`: one record per target, naming the handler that installed it
@@ -22,7 +22,7 @@ import type { Origin } from "./plan.ts";
 import { parseLayer, type Dependency } from "./layer.ts";
 import type { Provider } from "./di/index.ts";
 
-/** Where a winning item came from: a repo at a ref, or a path (pinned to a commit when it has a ref). */
+/** Where a winning item came from: a repository pinned to a commit, or a live path. */
 export type LockWinner = Origin;
 
 export interface LockTarget {
@@ -69,7 +69,7 @@ export async function loadLock(projectDir: string): Promise<LockFile> {
         throw new Error(`${lockPath(projectDir)}: invalid locked dependency.`);
       }
       parseLayer(JSON.stringify({ dependencies: [record.dependency] }), lockPath(projectDir));
-      if (("repo" in record.dependency || record.dependency.ref !== undefined) &&
+      if ("repo" in record.dependency &&
           (typeof record.commit !== "string" || !/^[a-f0-9]{40,64}$/.test(record.commit))) {
         throw new Error(`${lockPath(projectDir)}: invalid locked commit.`);
       }

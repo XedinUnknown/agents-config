@@ -79,10 +79,9 @@ dependency for a versioned local repository. Like Composer's path repositories,
 a live path pins nothing independently of the project's own version control.
 The path snapshot cache, `repo/snapshot`, and `git archive` extraction have
 been removed. The convention this enables: a project's own skills live
-in its `skills/`/`agents/` and come in via `path: .`, so install folders hold
-only installed content and are ignored whole. `~/.agents` is the exception
-(its `skills/` is both, because Codex/OpenCode read `~/.agents/skills`
-natively), so it keeps a manual ignore list.
+in its `skills/`/`agents/` and come in via `path: .`, separate from install
+folders. Built-in handlers maintain per-target ignore blocks for owned installs,
+including when authored and installed items share a directory, as in `~/.agents`.
 
 **Collision rule: last wins (`src/plan.ts`)**: when two dependencies provide
 the same skill or agent name, the later one in merged order replaces the
@@ -378,12 +377,9 @@ Design notes not obvious from `--help` (see `install --help` for the
       practice. The old `~/.agents/skills/_agentdeps_managed/` directory is
       already gone (no separate cleanup needed).
 - [ ] `codex` harness entry unverified (see Constraints).
-- [ ] Roadmap: keep installed content out of a project's git automatically —
-      e.g. maintain a marked block in the project's `.gitignore` listing the
-      paths agents-config installed (copies in `.agents/`, links in
-      `.claude/`, `agents-root`'s flat `skills/<name>`), derived from the
-      lock. Until then, projects list them by hand (`~/.agents/.gitignore`
-      does).
+- [x] Built-in handlers maintain per-target `.gitignore` blocks in destination
+      directories for lock-owned installs. See Configuration and Architecture
+      for preservation, retry, and Git tracking limitations.
 - [ ] Roadmap: convert Markdown agents to Codex's TOML format in the `codex`
       handler (it skips agents with a warning until then).
 - No interactive `add` picker — not planned. The manifest already declares

@@ -64,10 +64,29 @@ item, not per destination directory.
   not file size or modification time.
 - Unreadable or old-format locks abort rather than silently losing ownership.
 
+Built-in flat handlers also synchronize a marked block per target in each
+destination's `.gitignore`, using literal patterns for that target's recorded
+installed names, including retained modified items. Other text and other
+targets' blocks are preserved; all recognized managed blocks are validated for
+malformation, duplicates, nesting, and overlap before any block is replaced.
+The ignore file itself is not ignored or deleted when its last block is removed,
+so an empty file can remain. Git ignore rules do not untrack existing tracked
+files and cannot overcome an ignored parent directory.
+
+Ignore synchronization skips and warns about destinations outside the project,
+symlink or non-directory ancestors, and symlink or non-regular `.gitignore`
+files. Built-in handler state records skipped directories in `ignorePending`
+for retry; missing directories need no update. Synchronization also runs after
+an installation error, and handler progress is saved on failure. Custom handlers
+own their own ignore behavior.
+
 Disabled, removed, or handler-switched targets are first passed to their
 original handler with an empty request and `enabled: false`. Cleanup runs
 before current installs. If the original handler is unavailable, the run
-aborts instead of forgetting installed content.
+aborts instead of forgetting installed content. A handler switch also aborts when
+the old built-in handler retains modified owned installs or pending ignore
+cleanup, preserving its state until the reported condition is resolved. Custom
+handlers can report blocked cleanup without exposing their state.
 
 The lock also records every merged dependency declaration and its resolved
 commit, including dependencies that lose name collisions or select no items.

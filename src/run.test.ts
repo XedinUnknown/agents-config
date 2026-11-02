@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir, lstat, readlink } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir, lstat, readlink, rename, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -456,6 +456,69 @@ test("run/install: renaming a target or switching its handler undoes the old ins
     assert.equal(await pathExists(join(projectDir, "t", "demo")), false);
     assert.equal(await readFile(join(projectDir, "reg.txt"), "utf-8"), "demo");
     assert.deepEqual((await readLock(projectDir)).targets, { ours: { handler: "registry", state: { file: "reg.txt" } } });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("handler switch retains pending ignore cleanup and retries before installing the new handler", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-switch-pending-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const calls: Array<{ target: string; skills: string[]; state: unknown }> = [];
+    const install = installWithModule(root, project, registryHandler(calls));
+    await writeFile(join(project, "agents.yaml"), `targets:\n  ours:\n    handler: claude\n    paths: { skills: t }\n${deps}`);
+    await install();
+    const ignore = join(project, "t", ".gitignore");
+    const saved = join(project, "saved-ignore");
+    await rename(ignore, saved);
+    await symlink(saved, ignore);
+    await writeFile(join(project, "agents.yaml"), `targets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await assert.rejects(install(), /cannot switch handlers: .gitignore cleanup is pending/);
+    const lock = await readLock(project);
+    assert.equal(lock.targets.ours.handler, "claude");
+    assert.deepEqual(lock.targets.ours.state.ignorePending, ["t"]);
+    assert.equal(await pathExists(join(project, "reg.txt")), false);
+    await rm(ignore);
+    await rename(saved, ignore);
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.equal(await readFile(join(project, "reg.txt"), "utf8"), "demo");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("handler switch retains modified built-in installs and their ignore rules until resolved", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-switch-modified-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const install = installWithModule(root, project, registryHandler([]));
+    await writeFile(join(project, "agents.yaml"), `targets:\n  ours:\n    handler: claude\n    paths: { skills: t }\n${deps}`);
+    await install();
+    const item = join(project, "t", "demo");
+    const ignore = join(project, "t", ".gitignore");
+    await writeFile(join(item, "SKILL.md"), "modified");
+    await writeFile(join(project, "agents.yaml"), `targets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await assert.rejects(install(), /cannot switch handlers: modified installs remain owned/);
+    const lock = await readLock(project);
+    assert.equal(lock.targets.ours.handler, "claude");
+    assert.ok(lock.targets.ours.state.installs["t/demo"]);
+    assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
+    assert.equal(await readFile(join(item, "SKILL.md"), "utf8"), "modified");
+    assert.equal(await pathExists(join(project, "reg.txt")), false);
+    await rm(item, { recursive: true });
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.equal(await readFile(join(project, "reg.txt"), "utf8"), "demo");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

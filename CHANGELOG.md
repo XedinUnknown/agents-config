@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `update` resolves dependencies, updates `agents-lock.json` if needed, then installs.
+- Built-in handlers maintain per-target `.gitignore` blocks for lock-owned
+  installs, preserving user content and other targets' blocks. Unsafe or
+  outside-project ignore updates are warned about and retried; existing Git
+  tracking is not changed, and empty ignore files can remain after cleanup.
 
 ### Changed
 

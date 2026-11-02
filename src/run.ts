@@ -230,7 +230,7 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   // saved again below as handlers make progress.
   await services.saveLock(cwd, lock);
 
-  const sync = async (run: TargetRun, enabled: boolean): Promise<void> => {
+  const sync = async (run: TargetRun, enabled: boolean): Promise<SyncReport> => {
     const record = lock.targets[run.name] ?? { handler: run.handlerName, state: {} };
     lock.targets[run.name] = record;
     try {
@@ -244,6 +244,7 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
         state: record.state,
       });
       reportSync(run.name, report);
+      return report;
     } finally {
       if (Object.keys(record.state).length === 0) delete lock.targets[run.name];
     }
@@ -251,9 +252,12 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
 
   try {
     for (const run of runs.cleanups) {
-      await sync(run, false);
+      const report = await sync(run, false);
       const left = lock.targets[run.name];
       if (left && runs.installs.some((i) => i.name === run.name)) {
+        if (report.cleanupBlocked) {
+          throw new Error(`Target '${run.name}' cannot switch handlers: ${report.cleanupBlocked}`);
+        }
         // The target switched handlers; the new one starts its own record.
         console.warn(`    ⚠ [${run.name}] what the '${left.handler}' handler left in place is no longer tracked`);
         delete lock.targets[run.name];

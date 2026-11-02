@@ -67,6 +67,8 @@ export interface SyncReport {
   removed: string[];
   unchanged: string[];
   warnings: string[];
+  /** Cleanup must be retried before replacing this handler's state. */
+  cleanupBlocked?: string;
 }
 
 export interface TargetHandler {

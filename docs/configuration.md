@@ -126,9 +126,33 @@ This uses the repository cache like any other `repo` dependency and does not
 include uncommitted working-tree edits. Existing `path` dependencies with `ref`
 must either remove `ref` to become live or switch to a repository URI.
 
-Ignore generated install directories as a whole while tracking source skills,
-`agents.yaml`, and `agents-lock.json`. Automatic `.gitignore` maintenance is
-not implemented.
+## Git Ignore Management
+
+Built-in handlers maintain a marked block per target in each destination
+directory's `.gitignore`, listing that target's lock-owned installed names as
+literal, directory-relative patterns. Copies and links are covered, including
+modified stale items retained during cleanup. Foreign items are not added.
+Blocks are updated or removed as ownership changes; text outside the target's
+block and blocks for other targets are preserved. Malformed, overlapping,
+nested, or duplicate managed blocks for any target cause an error rather than
+being overwritten.
+
+Git ignore rules do not untrack files already in Git, and cannot override an
+ignore rule on a parent directory. Later user rules can override a managed
+pattern. Review existing tracking and ignore rules
+when adopting this feature. The generated `.gitignore` does not ignore itself;
+track it if the rules should be shared, along with `agents.yaml`,
+`agents-lock.json`, and authored source. Removing the last block can leave an
+empty `.gitignore` file; the tool does not delete it.
+
+Ignore management is skipped with a warning for destinations outside the
+project, paths with a symlink or non-directory ancestor, and `.gitignore` files
+that are symlinks or not regular files. Installation can still take place at
+those destinations; manage their ignore rules separately. Skipped updates are
+retained for retry. A switch to a different handler is blocked while the old
+built-in handler has pending ignore cleanup or retains modified owned installs;
+resolve the reported paths or warnings and retry the switch.
+Custom handlers are responsible for their own ignore rules.
 
 ## Targets and Interop
 

@@ -38,8 +38,8 @@ and only the winner is installed.
 
 ## Configuration Composition
 
-Machine `config.yaml` and project `agents.yaml` share one schema. Scalars
-replace, target settings merge by key, and dependency entries with the same
+Machine `config.yaml` and project `agents.yaml` share one schema. Scalars,
+including `manage_gitignore`, replace; target settings merge by key, and dependency entries with the same
 normalized repository or path replace in place. Distinct dependencies append.
 This makes dependency order significant for same-name collisions.
 
@@ -64,8 +64,9 @@ item, not per destination directory.
   not file size or modification time.
 - Unreadable or old-format locks abort rather than silently losing ownership.
 
-Built-in flat handlers also synchronize a marked block per target in each
-destination's `.gitignore`, using literal patterns for that target's recorded
+When the merged top-level `manage_gitignore` setting is true, built-in flat
+handlers synchronize a marked block per target in each destination's
+`.gitignore`, using literal patterns for that target's recorded
 installed names, including retained modified items. Other text and other
 targets' blocks are preserved; all recognized managed blocks are validated for
 malformation, duplicates, nesting, and overlap before any block is replaced.
@@ -79,6 +80,12 @@ files. Built-in handler state records skipped directories in `ignorePending`
 for retry; missing directories need no update. Synchronization also runs after
 an installation error, and handler progress is saved on failure. Custom handlers
 own their own ignore behavior.
+
+`manage_gitignore` defaults to false. When false, built-in handlers leave ignore
+files and existing managed blocks untouched; blocks may become stale until
+management is enabled again, and users may remove them manually. Because a
+handler switch can require cleanup by the previous built-in handler, enable
+management when that cleanup is needed.
 
 Disabled, removed, or handler-switched targets are first passed to their
 original handler with an empty request and `enabled: false`. Cleanup runs

@@ -47,15 +47,16 @@ export interface FileInstall {
 export interface FilesState {
   installs?: Record<string, FileInstall>;
   ignorePending?: string[];
+  managedIgnoreDirs?: string[];
 }
 
-async function syncIgnores(projectDir: string, targetName: string, state: FilesState, warnings: string[]): Promise<void> {
+async function syncIgnores(projectDir: string, targetName: string, state: FilesState, directories: string[], warnings: string[]): Promise<void> {
   const id = Buffer.from(targetName).toString("base64url");
   const start = `# BEGIN agents-config MANAGED BLOCK (${id})`;
   const end = `# END agents-config MANAGED BLOCK (${id})`;
   const paths = Object.keys(state.installs ?? {});
   const skipped: string[] = [];
-  for (const dir of state.ignorePending ?? []) {
+  for (const dir of directories) {
     const names = paths.filter((path) => dirname(path) === dir).map((path) => basename(path)).filter((name) => name !== ".gitignore").sort();
     const root = resolve(projectDir);
     const destination = resolve(root, dir);
@@ -151,6 +152,11 @@ async function syncIgnores(projectDir: string, targetName: string, state: FilesS
   }
   if (skipped.length) state.ignorePending = skipped;
   else delete state.ignorePending;
+  const stillInstalled = new Set(Object.keys(state.installs ?? {}).map(dirname));
+  const retained = [...new Set([...directories.filter((dir) => stillInstalled.has(dir) || skipped.includes(dir)), ...skipped])].sort();
+  if (retained.length || skipped.length) state.managedIgnoreDirs = retained;
+  else delete state.managedIgnoreDirs;
+  if (!skipped.length) delete state.ignorePending;
 }
 
 export interface SyncResult {
@@ -288,20 +294,26 @@ export async function syncFiles(
   plan: FileItems,
   installMethod: "link" | "copy",
   state: FilesState,
-  targetName?: string
+  targetName?: string,
+  manageGitignore = false
 ): Promise<SyncResult> {
   const result: SyncResult = { added: [], updated: [], removed: [], unchanged: [], skippedForeign: [], keptModified: [], warnings: [] };
   const desired = await placements(paths, plan);
-  if (targetName !== undefined) {
+  if (targetName !== undefined && manageGitignore) {
     for (const path of [...desired.keys(), ...Object.keys(state.installs ?? {})]) {
       if (/[\r\n]/.test(basename(path))) throw new Error(`Cannot express ${JSON.stringify(path)} in .gitignore`);
       if (basename(path) === ".gitignore") throw new Error(`Cannot install over the managed .gitignore: ${path}`);
     }
-    state.ignorePending = [...new Set([...(state.ignorePending ?? []), ...Object.keys(state.installs ?? {}).map(dirname)])];
+    state.managedIgnoreDirs = [...new Set([
+      ...(state.managedIgnoreDirs ?? []),
+      ...(state.ignorePending ?? []),
+      ...Object.keys(state.installs ?? {}).map(dirname),
+    ])];
+    state.managedIgnoreDirs ??= [];
   }
   const installs = (state.installs ??= {});
   const markPending = (path: string) => {
-    if (targetName !== undefined && !state.ignorePending!.includes(dirname(path))) state.ignorePending!.push(dirname(path));
+    if (manageGitignore && targetName !== undefined && !state.managedIgnoreDirs!.includes(dirname(path))) state.managedIgnoreDirs!.push(dirname(path));
   };
 
   let installError: unknown;
@@ -375,8 +387,13 @@ export async function syncFiles(
   }
   if (Object.keys(installs).length === 0) delete state.installs;
   try {
-    if (targetName !== undefined) await syncIgnores(projectDir, targetName, state, result.warnings);
+    if (manageGitignore && targetName !== undefined) {
+      const directories = [...new Set([...(state.managedIgnoreDirs ?? []), ...Object.keys(state.installs ?? {}).map(dirname)])].sort();
+      state.managedIgnoreDirs = directories;
+      await syncIgnores(projectDir, targetName, state, directories, result.warnings);
+    }
   } catch (error) {
+    if (targetName !== undefined && state.managedIgnoreDirs?.length) state.ignorePending = [...state.managedIgnoreDirs];
     if (failed) throw new AggregateError([installError, error], "Install and .gitignore synchronization both failed");
     throw error;
   }
@@ -434,14 +451,20 @@ export function flatDirectoryHandler(
         if (reason === undefined) items[kind] = requested[kind];
         else if (requested[kind].length > 0) skipped.push(`${requested[kind].length} ${kind} not installed: ${reason}`);
       }
-      const r = await syncFiles(ctx.projectDir, paths, items, ctx.installMethod, ctx.state as FilesState, ctx.targetName);
+      const r = await syncFiles(ctx.projectDir, paths, items, ctx.installMethod, ctx.state as FilesState, ctx.targetName, ctx.manageGitignore);
       const state = ctx.state as FilesState;
+      if (!ctx.enabled && ctx.manageGitignore && !state.installs && !state.managedIgnoreDirs?.length && !state.ignorePending?.length) {
+        delete state.ignorePending;
+        delete state.managedIgnoreDirs;
+      }
       return {
         added: r.added,
         updated: r.updated,
         removed: r.removed,
         unchanged: r.unchanged,
-        ...(!ctx.enabled && state.ignorePending?.length
+        ...(!ctx.manageGitignore && (state.managedIgnoreDirs?.length || state.ignorePending?.length)
+          ? { cleanupBlocked: ".gitignore bookkeeping is retained while management is disabled; enable manage_gitignore and retry" }
+          : !ctx.enabled && state.ignorePending?.length
           ? { cleanupBlocked: ".gitignore cleanup is pending; resolve the reported warnings and retry" }
           : !ctx.enabled && Object.keys(state.installs ?? {}).length
           ? { cleanupBlocked: "modified installs remain owned; resolve the reported paths and retry" }

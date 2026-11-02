@@ -78,6 +78,7 @@ export type TargetOverride = Record<string, unknown>;
 export interface Layer {
   clone_method?: "ssh" | "https";
   install_method?: "link" | "copy";
+  manage_gitignore?: boolean;
   targets?: Record<string, boolean | TargetOverride>;
   dependencies?: Dependency[];
 }
@@ -85,6 +86,7 @@ export interface Layer {
 export interface Settings {
   clone_method: "ssh" | "https";
   install_method: "link" | "copy";
+  manage_gitignore: boolean;
   /** Whether any layer has a `targets` key; install refuses to guess when none does. */
   targetsDeclared: boolean;
   /** Enabled targets, in the order they first appear across layers — the order they run in. */
@@ -235,6 +237,14 @@ export function parseLayer(content: string, source: string): Layer {
     layer.install_method = installMethod;
   }
 
+  const manageGitignore = raw["manage_gitignore"];
+  if (manageGitignore !== undefined) {
+    if (typeof manageGitignore !== "boolean") {
+      throw new Error(`${source}: invalid manage_gitignore "${String(manageGitignore)}". Must be true or false.`);
+    }
+    layer.manage_gitignore = manageGitignore;
+  }
+
   if (raw["targets"] !== undefined) {
     layer.targets = parseTargets(raw["targets"], source);
   }
@@ -276,12 +286,14 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
   const targets = new Map<string, TargetState>();
   let cloneMethod: Settings["clone_method"] = "https";
   let installMethod: Settings["install_method"] = "copy";
+  let manageGitignore = false;
   let targetsDeclared = false;
   const dependencies = new Map<string, Dependency>();
 
   for (const layer of layers) {
     if (layer.clone_method !== undefined) cloneMethod = layer.clone_method;
     if (layer.install_method !== undefined) installMethod = layer.install_method;
+    if (layer.manage_gitignore !== undefined) manageGitignore = layer.manage_gitignore;
 
     if (layer.targets !== undefined) {
       targetsDeclared = true;
@@ -311,6 +323,7 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
   return {
     clone_method: cloneMethod,
     install_method: installMethod,
+    manage_gitignore: manageGitignore,
     targetsDeclared,
     targets: [...targets]
       .filter(([, state]) => state.enabled)

@@ -53,7 +53,7 @@ the project directory). On sync, for the built-in handlers:
 
 **Settings layers (`src/layer.ts`)**: `config.yaml` (machine defaults) and
 `agents.yaml` (project) share one schema — `clone_method`, `install_method`,
-`targets`, `dependencies` — merged `config.yaml` → `agents.yaml`. Scalars
+`manage_gitignore`, `targets`, `dependencies` — merged `config.yaml` → `agents.yaml`. Scalars
 replace, maps merge by key. `targets` values: `true` enables a target,
 `false` disables an inherited one, a map adds one or overrides an inherited
 one's settings (merged by key, so an override can change just one path).
@@ -66,7 +66,11 @@ first); re-declaring an inherited target changes its settings, not its
 position. The merge contains only what config says — handler defaults are not
 merged in (see Target handlers). Dependencies are keyed by normalized repo
 or path (`dependencyKey`): a later layer's entry for the same one replaces
-the earlier one *in place*, distinct ones append.
+the earlier one *in place*, distinct ones append. `manage_gitignore` is a
+top-level boolean scalar, defaults to `false`, and is overridden by the project
+value. When false, built-in handlers leave existing ignore blocks untouched;
+they may be stale until management is re-enabled, or users clean them up
+manually. A handler switch may require ignore cleanup to be enabled.
 
 **Dependencies: `repo` vs `path` (`src/layer.ts`)**: `repo` is a repository
 URI or `owner/repo` only — a bare filesystem path is rejected with a hint,
@@ -80,8 +84,9 @@ a live path pins nothing independently of the project's own version control.
 The path snapshot cache, `repo/snapshot`, and `git archive` extraction have
 been removed. The convention this enables: a project's own skills live
 in its `skills/`/`agents/` and come in via `path: .`, separate from install
-folders. Built-in handlers maintain per-target ignore blocks for owned installs,
-including when authored and installed items share a directory, as in `~/.agents`.
+folders. When enabled, built-in handlers maintain per-target ignore blocks for
+owned installs, including when authored and installed items share a directory,
+as in `~/.agents`.
 
 **Collision rule: last wins (`src/plan.ts`)**: when two dependencies provide
 the same skill or agent name, the later one in merged order replaces the
@@ -377,9 +382,10 @@ Design notes not obvious from `--help` (see `install --help` for the
       practice. The old `~/.agents/skills/_agentdeps_managed/` directory is
       already gone (no separate cleanup needed).
 - [ ] `codex` harness entry unverified (see Constraints).
-- [x] Built-in handlers maintain per-target `.gitignore` blocks in destination
-      directories for lock-owned installs. See Configuration and Architecture
-      for preservation, retry, and Git tracking limitations.
+- [x] Built-in handlers can maintain per-target `.gitignore` blocks in
+      destination directories for lock-owned installs when `manage_gitignore`
+      is enabled. See Configuration and Architecture for preservation, opt-in
+      behavior, retry, and Git tracking limitations.
 - [ ] Roadmap: convert Markdown agents to Codex's TOML format in the `codex`
       handler (it skips agents with a warning until then).
 - No interactive `add` picker — not planned. The manifest already declares

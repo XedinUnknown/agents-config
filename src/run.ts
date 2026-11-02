@@ -241,6 +241,7 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
         options: run.options,
         plan: enabled ? plan : NOTHING,
         installMethod: settings.install_method,
+        manageGitignore: settings.manage_gitignore,
         state: record.state,
       });
       reportSync(run.name, report);
@@ -250,17 +251,33 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
     }
   };
 
+  const cleanupSync = async (run: TargetRun): Promise<SyncReport> => {
+    const record = lock.targets[run.name]!;
+    const report = await run.handler.sync({
+      projectDir: cwd,
+      targetName: run.name,
+      enabled: false,
+      options: run.options,
+      plan: NOTHING,
+      installMethod: settings.install_method,
+      manageGitignore: settings.manage_gitignore,
+      state: record.state,
+    });
+    reportSync(run.name, report);
+    return report;
+  };
+
   try {
     for (const run of runs.cleanups) {
-      const report = await sync(run, false);
+      const report = await cleanupSync(run);
       const left = lock.targets[run.name];
-      if (left && runs.installs.some((i) => i.name === run.name)) {
+      if (left && !report.cleanupBlocked && Object.keys(left.state).length === 0) delete lock.targets[run.name];
+      const remaining = lock.targets[run.name];
+      if (remaining && runs.installs.some((i) => i.name === run.name)) {
         if (report.cleanupBlocked) {
           throw new Error(`Target '${run.name}' cannot switch handlers: ${report.cleanupBlocked}`);
         }
-        // The target switched handlers; the new one starts its own record.
-        console.warn(`    ⚠ [${run.name}] what the '${left.handler}' handler left in place is no longer tracked`);
-        delete lock.targets[run.name];
+        throw new Error(`Target '${run.name}' cannot switch handlers: the '${remaining.handler}' handler retained state after cleanup`);
       }
     }
     for (const run of runs.installs) {

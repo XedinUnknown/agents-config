@@ -17,6 +17,7 @@ For a shared setup across Claude Code, OpenCode, and Codex:
 ```yaml
 clone_method: https
 install_method: copy
+manage_gitignore: true
 targets:
   interop: true
   claude-interop: true
@@ -39,6 +40,7 @@ project with custom destination paths.
 ```yaml
 clone_method: https
 install_method: copy
+manage_gitignore: true
 targets:
   claude: true
 dependencies:
@@ -52,6 +54,9 @@ dependencies:
 
 - `clone_method` is `https` (default) or `ssh`; project values replace defaults.
 - `install_method` is `copy` (default) or `link`.
+- `manage_gitignore` is `false` by default. Set it to `true` to have built-in
+  handlers maintain managed ignore blocks. As a scalar, a project value in
+  `agents.yaml` overrides the machine value in `config.yaml`.
 - `targets` merge by name. `true` enables a target, `false` disables an
   inherited one, and a map adds or overrides settings by key.
 - Changing a target's explicit `handler` starts its settings fresh. Absent or
@@ -128,14 +133,20 @@ must either remove `ref` to become live or switch to a repository URI.
 
 ## Git Ignore Management
 
-Built-in handlers maintain a marked block per target in each destination
-directory's `.gitignore`, listing that target's lock-owned installed names as
+When `manage_gitignore: true`, built-in handlers maintain a marked block per
+target in each destination directory's `.gitignore`, listing that target's lock-owned installed names as
 literal, directory-relative patterns. Copies and links are covered, including
 modified stale items retained during cleanup. Foreign items are not added.
 Blocks are updated or removed as ownership changes; text outside the target's
 block and blocks for other targets are preserved. Malformed, overlapping,
 nested, or duplicate managed blocks for any target cause an error rather than
 being overwritten.
+
+When disabled, handlers leave `.gitignore` files and existing managed blocks
+untouched. Those blocks can become stale as installs change or are removed and
+remain so until management is re-enabled. Users may clean up stale blocks
+manually. If changing a target to a different handler, enable ignore management
+for cleanup when the old built-in handler has ignore cleanup pending.
 
 Git ignore rules do not untrack files already in Git, and cannot override an
 ignore rule on a parent directory. Later user rules can override a managed

@@ -101,9 +101,11 @@ dependencies:
     agents: false
 ```
 
-`path` resolves relative to the project, or accepts an absolute path. Without
-`ref`, it reads the directory live and links by default, so edits are visible
-immediately. It pins nothing independently of the project's own version control.
+`path` resolves relative to the project, or accepts an absolute path. It always
+reads the directory live and links by default, so edits are visible immediately.
+Set `install_method: copy` on the dependency to copy instead. Paths do not require
+Git or a Git repository and do not accept `ref`. They pin nothing independently
+of the project's own version control.
 
 The source directories are distinct from destinations such as `.agents/skills`
 and `.claude/skills`. Those destinations hold installed copies or links managed
@@ -111,11 +113,17 @@ by the tool. Keeping source separate lets you ignore generated installs without
 ignoring the files you author. This convention applies to local dependencies;
 you don't need source directories when installing only third-party skills.
 
-With `ref`, the tool reads the requested Git revision rather than the live
-directory. It uses `git archive` to extract that revision into the cache without
-switching your working tree or including uncommitted edits. It records the
-resolved commit and follows `install_method` like a repository. Files marked
-`export-ignore` in `.gitattributes` are excluded from the snapshot.
+For a versioned local Git repository, use `repo` with a `file://` URI instead:
+
+```yaml
+dependencies:
+  - repo: file:///absolute/path/to/repository
+    ref: v1.2
+```
+
+This uses the repository cache like any other `repo` dependency and does not
+include uncommitted working-tree edits. Existing `path` dependencies with `ref`
+must either remove `ref` to become live or switch to a repository URI.
 
 Ignore generated install directories as a whole while tracking source skills,
 `agents.yaml`, and `agents-lock.json`. Automatic `.gitignore` maintenance is

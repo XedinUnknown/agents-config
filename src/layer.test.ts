@@ -153,7 +153,7 @@ test("mergeLayers: a later entry for the same repo replaces the earlier one in p
     },
   ]);
   assert.deepEqual(
-    settings.dependencies.map((d) => ["repo" in d ? d.repo : d.path, d.ref]),
+    settings.dependencies.map((d) => "repo" in d ? [d.repo, d.ref] : [d.path]),
     [
       ["Owner/A.git", "v2"],
       ["owner/b", "main"],
@@ -184,15 +184,24 @@ test("parseLayer: repo accepts URIs and owner/repo only, and rejects bare paths 
   }
 });
 
-test("parseLayer: path dependencies, optional ref and install_method; exactly one of repo/path", () => {
+test("parseLayer: live path dependencies and install_method; exactly one of repo/path", () => {
   assert.deepEqual(
-    parseLayer("dependencies:\n  - path: .\n  - path: ../lib\n    ref: v1\n    install_method: copy\n", "x.yaml").dependencies,
+    parseLayer("dependencies:\n  - path: .\n  - path: ../lib\n    install_method: copy\n", "x.yaml").dependencies,
     [
       { path: ".", skills: "*", agents: "*" },
-      { path: "../lib", ref: "v1", skills: "*", agents: "*", install_method: "copy" },
+      { path: "../lib", skills: "*", agents: "*", install_method: "copy" },
     ]
   );
   assert.throws(() => parseLayer("dependencies:\n  - path: .\n    repo: o/r\n", "x.yaml"), /exactly one of 'repo' or 'path'/);
   assert.throws(() => parseLayer("dependencies:\n  - skills: false\n", "x.yaml"), /exactly one of 'repo' or 'path'/);
   assert.throws(() => parseLayer("dependencies:\n  - path: .\n    install_method: move\n", "x.yaml"), /install_method must be/);
+});
+
+test("parseLayer rejects any ref on a path dependency with a versioned local repo hint", () => {
+  for (const ref of ["v1", '""', "null", "", "false", "123", "[]", "{}"]) {
+    assert.throws(
+      () => parseLayer(`dependencies:\n  - path: .\n    ref: ${ref}\n`, "x.yaml"),
+      /x\.yaml: dependency at index 0: 'ref' is not supported for path dependencies; paths are always live\. Use 'repo: file:\/\/\/absolute\/path\/to\/repository' with 'ref'/
+    );
+  }
 });

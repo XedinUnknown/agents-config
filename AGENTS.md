@@ -73,12 +73,12 @@ URI or `owner/repo` only — a bare filesystem path is rejected with a hint,
 because relative paths there were resolved against the clone cache (and
 every project's `repo: .` would have shared one cache entry). `path` is a
 folder with the standard `skills/` + `agents/` layout, resolved against the
-project: live without `ref` (linked by default, relative), or with `ref`
-read via `git archive` of the resolved commit into the cache (`repo/snapshot`,
-keyed by repository and commit) and recorded as `{path, ref, commit}`. Like
-Composer's path repositories, a live path pins nothing — the project's own
-commit pins it, since path sources normally live in the same repo; `ref` is
-for pinning anyway. The convention this enables: a project's own skills live
+project: always live (linked by default, relative), without Git operations or
+a Git requirement. `ref` on a path is rejected; use a `file://` repository
+dependency for a versioned local repository. Like Composer's path repositories,
+a live path pins nothing independently of the project's own version control.
+The path snapshot cache, `repo/snapshot`, and `git archive` extraction have
+been removed. The convention this enables: a project's own skills live
 in its `skills/`/`agents/` and come in via `path: .`, so install folders hold
 only installed content and are ignored whole. `~/.agents` is the exception
 (its `skills/` is both, because Codex/OpenCode read `~/.agents/skills`

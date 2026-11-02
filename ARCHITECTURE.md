@@ -25,9 +25,9 @@ This is not a transaction across handlers: a later installation failure does
 not imply that earlier filesystem changes are rolled back.
 
 Repository dependencies are cloned or updated in the configured cache. Local
-`path` dependencies are read live without a `ref`; with a `ref`, a resolved
-commit is extracted using `git archive` into the snapshot cache. Archive
-exclusions in `.gitattributes` apply.
+`path` dependencies are always read live from disk, without Git operations or
+cache snapshots. They reject `ref`; versioned local repositories use `repo`
+with a `file://` URI instead. Only repository fetches require Git to be installed.
 
 Discovery reads `skills/<name>/SKILL.md` and agents under `agents/`. Dependency
 selections filter the results. When multiple dependencies provide the same

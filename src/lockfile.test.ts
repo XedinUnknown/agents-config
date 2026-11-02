@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, access } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, access, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadLock, saveLock, lockPath, emptyLock, type LockFile } from "./lockfile.ts";
@@ -56,6 +56,32 @@ test("saveLock then loadLock round-trips, next to the project's agents.yaml", as
     await saveLock(dir, sampleLock);
     assert.equal(lockPath(dir), join(dir, "agents-lock.json"));
     assert.deepEqual(await loadLock(dir), sampleLock);
+  });
+});
+
+test("locked resolutions round-trip even with no selected items or targets", async () => {
+  await withTmpDir(async (dir) => {
+    const lock: LockFile = { ...emptyLock(), dependencies: [{
+      dependency: { repo: "owner/repo", ref: "main", skills: false, agents: false },
+      commit: "a".repeat(40),
+    }] };
+    await saveLock(dir, lock);
+    assert.deepEqual(await loadLock(dir), lock);
+    lock.dependencies = [];
+    await saveLock(dir, lock);
+    assert.deepEqual(await loadLock(dir), lock);
+  });
+});
+
+test("loadLock refuses missing commits and unreadable paths rather than resolving afresh", async () => {
+  await withTmpDir(async (dir) => {
+    await writeFile(lockPath(dir), JSON.stringify({ ...emptyLock(), dependencies: [{
+      dependency: { repo: "owner/repo", ref: "main", skills: "*", agents: false },
+    }] }));
+    await assert.rejects(loadLock(dir), /invalid locked commit/);
+    await rm(lockPath(dir));
+    await mkdir(lockPath(dir));
+    await assert.rejects(loadLock(dir), { code: "EISDIR" });
   });
 });
 

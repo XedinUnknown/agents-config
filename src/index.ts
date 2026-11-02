@@ -57,9 +57,7 @@ program.hook("preAction", async (thisCommand) => {
 program
   .command("install")
   .description(
-    "Install dependencies from the current directory's agents.yaml." +
-      " Re-running prunes anything previously installed that's no longer desired," +
-      " including when the dependencies list has been emptied."
+    "Install locked dependencies. Without a lockfile, resolve dependencies and create one."
   )
   .addHelpText(
     "after",
@@ -67,6 +65,10 @@ program
 Settings are layered: config.yaml (machine defaults), then the current
 directory's agents.yaml. Both files share one schema
 (clone_method, install_method, targets, dependencies); later layers win.
+
+Existing locks pin Git commits. Changes to dependency declarations require
+'agents-config update'; target settings can change without updating dependencies.
+Live path dependencies remain live. Older locks need one update to pin commits.
 
 Targets come from the merged "targets" map: true enables one, false disables
 an inherited one, and a map of settings adds or overrides one. Each target is
@@ -95,6 +97,13 @@ within that directory as its own project instead.
   });
 
 program
+  .command("update")
+  .description("Resolve current dependencies, update agents-lock.json if needed, then install and prune")
+  .action(async () => {
+    await container.resolve<() => Promise<void>>("cli/update")();
+  });
+
+program
   .command("list")
   .description("List dependencies configured in the current directory's agents.yaml")
   .action(async () => {
@@ -107,7 +116,7 @@ function collect(value: string, previous: string[]): string[] {
 
 program
   .command("add")
-  .description("Add a dependency to agents.yaml, then run install (see 'install --help' for target defaults)")
+  .description("Add a dependency to agents.yaml, then update and install dependencies")
   .argument("<repo>", "Repository (owner/repo or full URL)")
   .option("--ref <ref>", "Git ref (branch, tag, SHA)", "main")
   .option("--skill <name>", "Install specific skill (repeatable)", collect, [])
@@ -122,7 +131,7 @@ program
 
 program
   .command("remove")
-  .description("Remove a dependency from agents.yaml, then run install to prune it")
+  .description("Remove a dependency from agents.yaml, then update and install to prune it")
   .argument("<repo>", "Repository to remove")
   .action(async (repo: string) => {
     await container.resolve<(repo: string) => Promise<void>>("cli/remove")(repo);

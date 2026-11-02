@@ -43,17 +43,21 @@ async function fetchDep(
   dep: Dependency,
   cwd: string,
   cloneMethod: "ssh" | "https",
-  services: RunServices
+  services: RunServices,
+  commit?: string
 ): Promise<{ dir: string; origin: Origin; method?: "copy" | "link" }> {
   const label = dependencyLabel(dep);
   const override = dep.install_method !== undefined ? { method: dep.install_method } : {};
 
   if (!isPathDependency(dep)) {
     const url = resolveRepoUrl(dep.repo, cloneMethod);
-    console.log(`  fetching ${label} (${dep.ref})`);
-    const cached = await services.ensureRepo(url, dep.ref, deriveCacheKey(dep.repo, dep.ref));
+    const ref = commit ?? dep.ref;
+    console.log(`  fetching ${label} (${ref})`);
+    const cached = await services.ensureRepo(url, ref, deriveCacheKey(dep.repo, ref));
     if (!cached.success) throw new Error(`Failed to cache ${label}: ${cached.error ?? "unknown error"}`);
-    return { dir: cached.path, origin: { repo: dep.repo, ref: dep.ref }, ...override };
+    const snapshot = await services.snapshotPath(cached.path, commit ?? "HEAD");
+    if (!snapshot.success) throw new Error(`Failed to snapshot ${label}: ${snapshot.error ?? "unknown error"}`);
+    return { dir: snapshot.path, origin: { repo: dep.repo, ref: dep.ref, commit: snapshot.commit }, ...override };
   }
 
   const folder = resolve(cwd, dep.path);
@@ -64,7 +68,7 @@ async function fetchDep(
   }
 
   console.log(`  reading ${label} at ${dep.ref}`);
-  const snapshot = await services.snapshotPath(folder, dep.ref);
+  const snapshot = await services.snapshotPath(folder, commit ?? dep.ref);
   if (!snapshot.success) throw new Error(`Failed to read ${label} at ${dep.ref}: ${snapshot.error ?? "unknown error"}`);
   return { dir: snapshot.path, origin: { path: dep.path, ref: dep.ref, commit: snapshot.commit }, ...override };
 }
@@ -73,13 +77,14 @@ async function resolveDeps(
   deps: readonly Dependency[],
   cwd: string,
   cloneMethod: "ssh" | "https",
-  services: RunServices
+  services: RunServices,
+  locked?: LockFile["dependencies"]
 ): Promise<ResolvedDep[]> {
   const resolved: ResolvedDep[] = [];
 
-  for (const dep of deps) {
+  for (const [index, dep] of deps.entries()) {
     const label = dependencyLabel(dep);
-    const { dir, origin, method } = await fetchDep(dep, cwd, cloneMethod, services);
+    const { dir, origin, method } = await fetchDep(dep, cwd, cloneMethod, services, locked?.[index]?.commit);
 
     const [discoveredSkills, discoveredAgents] = await Promise.all([
       services.discoverSkills(dir),
@@ -179,7 +184,7 @@ function planRuns(targets: readonly Target[], lock: LockFile, services: RunServi
  * `run/install`'s factory body (below), split out so it can be exercised
  * directly (e.g. in tests) without a full container.
  */
-export async function runInstall(machine: Layer, cwd: string, services: RunServices): Promise<void> {
+export async function runInstall(machine: Layer, cwd: string, services: RunServices, update = false): Promise<void> {
   const manifestPath = join(cwd, "agents.yaml");
   if (!(await services.manifestExists(manifestPath))) {
     console.log("No agents.yaml found in the current directory.");
@@ -196,6 +201,15 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   }
   const lock = await services.loadLock(cwd);
   const runs = planRuns(settings.targets, lock, services);
+  const lockExists = await services.manifestExists(join(cwd, "agents-lock.json"));
+  if (!update && lockExists) {
+    if (lock.dependencies === undefined) {
+      throw new Error("This lockfile has no pinned dependency resolutions. Run agents-config update.");
+    }
+    if (JSON.stringify(lock.dependencies.map((record) => record.dependency)) !== JSON.stringify(settings.dependencies)) {
+      throw new Error("Dependencies differ from agents-lock.json. Run agents-config update.");
+    }
+  }
 
   if (settings.dependencies.length === 0) {
     console.log("No dependencies defined.");
@@ -205,7 +219,12 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   // Still run the (possibly empty) sync below even with no dependencies: a
   // manifest that just had its last dependency removed must prune whatever
   // was previously installed, not leave it stranded.
-  const resolved = await resolveDeps(settings.dependencies, cwd, settings.clone_method, services);
+  const resolved = await resolveDeps(settings.dependencies, cwd, settings.clone_method, services,
+    update ? undefined : lock.dependencies);
+  lock.dependencies = settings.dependencies.map((dependency, index) => {
+    const origin = resolved[index]!.origin;
+    return { dependency, ...("commit" in origin && origin.commit !== undefined ? { commit: origin.commit } : {}) };
+  });
   const plan = buildPlan(resolved);
   for (const r of plan.replacements) {
     console.log(`    ${r.kind}/${r.name}: ${r.by} replaces ${r.replaced} (later dependency wins)`);
@@ -214,6 +233,9 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   for (const kind of ITEM_KINDS) {
     lock[kind] = Object.fromEntries(plan[kind].map((item) => [item.name, item.origin]));
   }
+  // Resolution is durable even if a later handler fails; target ownership is
+  // saved again below as handlers make progress.
+  await services.saveLock(cwd, lock);
 
   const sync = async (run: TargetRun, enabled: boolean): Promise<void> => {
     const record = lock.targets[run.name] ?? { handler: run.handlerName, state: {} };
@@ -263,7 +285,10 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
 export function runProvider(): Provider {
   return {
     definitions: {
-      "run/install": (c: Container) => async (): Promise<void> => {
+      "run/update": (c: Container) => async (): Promise<void> => {
+        await c.resolve<(update?: boolean) => Promise<void>>("run/install")(true);
+      },
+      "run/install": (c: Container) => async (update = false): Promise<void> => {
         const machine = await c.resolve<Promise<Layer>>("config/loaded");
         const cwd = c.resolve<string>("platform/cwd");
 
@@ -287,7 +312,7 @@ export function runProvider(): Provider {
           getHandler: (name) => (c.has(handlerKey(name)) ? c.resolve<TargetHandler>(handlerKey(name)) : undefined),
         };
 
-        await runInstall(machine, cwd, services);
+        await runInstall(machine, cwd, services, update);
       },
     },
   };

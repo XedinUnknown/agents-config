@@ -43,6 +43,9 @@ export function cliProvider(): Provider {
         const runInstall = c.resolve<() => Promise<void>>("run/install");
         await runInstall();
       },
+      "cli/update": (c: Container) => async (): Promise<void> => {
+        await c.resolve<() => Promise<void>>("run/update")();
+      },
 
       "cli/list": (c: Container) => async (): Promise<void> => {
         const machine = await c.resolve<Promise<Layer>>("config/loaded");
@@ -83,7 +86,7 @@ export function cliProvider(): Provider {
           const manifestExists = c.resolve<(path: string) => Promise<boolean>>("manifest/exists");
           const loadManifest = c.resolve<(path: string) => Promise<Layer>>("manifest/load");
           const saveDependencies = c.resolve<SaveDependenciesFn>("manifest/save");
-          const runInstall = c.resolve<() => Promise<void>>("run/install");
+          const runUpdate = c.resolve<() => Promise<void>>("run/update");
 
           const targetPath = join(cwd, "agents.yaml");
           const project = (await manifestExists(targetPath)) ? await loadManifest(targetPath) : {};
@@ -133,7 +136,7 @@ export function cliProvider(): Provider {
           await saveDependencies(targetPath, dependencies);
           console.log(`✓ ${verb} ${repo} in agents.yaml`);
 
-          await runInstall();
+          await runUpdate();
         },
 
       "cli/remove":
@@ -144,7 +147,7 @@ export function cliProvider(): Provider {
           const manifestExists = c.resolve<(path: string) => Promise<boolean>>("manifest/exists");
           const loadManifest = c.resolve<(path: string) => Promise<Layer>>("manifest/load");
           const saveDependencies = c.resolve<SaveDependenciesFn>("manifest/save");
-          const runInstall = c.resolve<() => Promise<void>>("run/install");
+          const runUpdate = c.resolve<() => Promise<void>>("run/update");
 
           const targetPath = join(cwd, "agents.yaml");
 
@@ -171,7 +174,7 @@ export function cliProvider(): Provider {
           await saveDependencies(targetPath, dependencies);
           console.log(`✓ removed ${removed ? dependencyLabel(removed) : repoOrPath} from agents.yaml`);
 
-          await runInstall();
+          await runUpdate();
         },
 
       "cli/config": (c: Container) => async (): Promise<void> => {

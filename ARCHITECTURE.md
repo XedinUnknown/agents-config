@@ -11,11 +11,11 @@ own installation and cleanup.
 ```mermaid
 flowchart TD
     A[Machine config + project manifest] --> B[Merge settings and validate targets]
-    B --> C[Resolve repositories and local paths]
+    B --> C[Install locked commits or resolve on update]
     C --> D[Discover and select skills and agents]
     D --> E[Resolve name collisions: last wins]
-    E --> F[Clean up old targets and sync enabled targets]
-    F --> G[Write project lockfile]
+    E --> F[Write dependency resolutions]
+    F --> G[Clean up and sync targets, saving ownership]
 ```
 
 All enabled targets are validated before dependencies are fetched or installed.
@@ -24,7 +24,8 @@ an unavailable repository cannot accidentally turn into a request to prune it.
 This is not a transaction across handlers: a later installation failure does
 not imply that earlier filesystem changes are rolled back.
 
-Repository dependencies are cloned or updated in the configured cache. Local
+Repository dependencies are cloned or updated in the configured cache and
+installed from immutable commit snapshots. Local
 `path` dependencies are read live without a `ref`; with a `ref`, a resolved
 commit is extracted using `git archive` into the snapshot cache. Archive
 exclusions in `.gitattributes` apply.
@@ -67,9 +68,14 @@ original handler with an empty request and `enabled: false`. Cleanup runs
 before current installs. If the original handler is unavailable, the run
 aborts instead of forgetting installed content.
 
-The lock records ownership and resolved information; repository dependencies
-using moving refs are fetched again on installation. Use an explicit commit
-ref when the repository content must remain pinned.
+The lock also records every merged dependency declaration and its resolved
+commit, including dependencies that lose name collisions or select no items.
+`install` reuses those commits; `update` resolves current refs and then installs.
+An absent lock is resolved on install, while an older ownership-only lock needs
+an explicit update. Dependency declaration drift aborts install before mutations;
+target settings are not part of dependency resolution. Live paths remain live.
+Unchanged locks are not rewritten. Resolution is saved before syncing targets,
+and handler progress is saved even if a later handler fails.
 
 ## Target Handlers
 

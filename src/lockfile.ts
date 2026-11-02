@@ -5,8 +5,10 @@
  * The lock records:
  *
  *  - `skills`/`agents`: the final winner per name after the last-wins plan
- *    (see plan.ts) — where each installed name came from: `{repo, ref}`,
+ *    (see plan.ts) — where each installed name came from: `{repo, ref, commit}`,
  *    `{path}` for a live folder, or `{path, ref, commit}` for a pinned one.
+ *  - `dependencies`: merged declarations and resolved commits, including
+ *    non-winning sources. Absent in older ownership-only version-2 locks.
  *  - `targets`: one record per target, naming the handler that installed it
  *    and holding that handler's own state — e.g. the built-in handlers list
  *    every concrete path they placed on disk, and only ever update or remove
@@ -17,6 +19,7 @@
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Origin } from "./plan.ts";
+import { parseLayer, type Dependency } from "./layer.ts";
 import type { Provider } from "./di/index.ts";
 
 /** Where a winning item came from: a repo at a ref, or a path (pinned to a commit when it has a ref). */
@@ -29,6 +32,7 @@ export interface LockTarget {
 
 export interface LockFile {
   version: 2;
+  dependencies?: Array<{ dependency: Dependency; commit?: string }>;
   skills: Record<string, LockWinner>;
   agents: Record<string, LockWinner>;
   targets: Record<string, LockTarget>;
@@ -48,8 +52,9 @@ export async function loadLock(projectDir: string): Promise<LockFile> {
   let content: string;
   try {
     content = await readFile(lockPath(projectDir), "utf-8");
-  } catch {
-    return emptyLock();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyLock();
+    throw error;
   }
   const parsed = JSON.parse(content) as Partial<LockFile>;
   if (parsed.version !== 2 || typeof parsed.targets !== "object" || parsed.targets === null) {
@@ -57,11 +62,31 @@ export async function loadLock(projectDir: string): Promise<LockFile> {
     // previously installed path into foreign content that is never cleaned up.
     throw new Error(`${lockPath(projectDir)}: unsupported lockfile format (expected version 2).`);
   }
-  return { version: 2, skills: parsed.skills ?? {}, agents: parsed.agents ?? {}, targets: parsed.targets };
+  if (parsed.dependencies !== undefined) {
+    if (!Array.isArray(parsed.dependencies)) throw new Error(`${lockPath(projectDir)}: invalid locked dependencies.`);
+    for (const record of parsed.dependencies) {
+      if (typeof record !== "object" || record === null) {
+        throw new Error(`${lockPath(projectDir)}: invalid locked dependency.`);
+      }
+      parseLayer(JSON.stringify({ dependencies: [record.dependency] }), lockPath(projectDir));
+      if (("repo" in record.dependency || record.dependency.ref !== undefined) &&
+          (typeof record.commit !== "string" || !/^[a-f0-9]{40,64}$/.test(record.commit))) {
+        throw new Error(`${lockPath(projectDir)}: invalid locked commit.`);
+      }
+    }
+  }
+  return {
+    version: 2,
+    skills: parsed.skills ?? {},
+    agents: parsed.agents ?? {},
+    targets: parsed.targets,
+    ...(parsed.dependencies !== undefined ? { dependencies: parsed.dependencies } : {}),
+  };
 }
 
 export async function saveLock(projectDir: string, lock: LockFile): Promise<void> {
   const empty =
+    lock.dependencies === undefined &&
     Object.keys(lock.targets).length === 0 &&
     Object.keys(lock.skills).length === 0 &&
     Object.keys(lock.agents).length === 0;
@@ -69,7 +94,13 @@ export async function saveLock(projectDir: string, lock: LockFile): Promise<void
     await rm(lockPath(projectDir), { force: true });
     return;
   }
-  await writeFile(lockPath(projectDir), JSON.stringify(lock, null, 2) + "\n", "utf-8");
+  const content = JSON.stringify(lock, null, 2) + "\n";
+  try {
+    if (await readFile(lockPath(projectDir), "utf-8") === content) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await writeFile(lockPath(projectDir), content, "utf-8");
 }
 
 /** Provider exposing lockfile I/O as keyed definitions (the function references themselves). */

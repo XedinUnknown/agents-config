@@ -78,8 +78,9 @@ agents-config install
 agents-config list
 ```
 
-The layout shown above is the result. Re-run `install` after changing the
-manifest to sync it. If your coding tool doesn't discover the skill in an
+The layout shown above is the result. Subsequent installs use locked Git commits.
+Run `agents-config update` to refresh dependencies or after editing dependency
+declarations. If your coding tool doesn't discover the skill in an
 already-running session, start a new session.
 
 Commit `agents.yaml` and `agents-lock.json`. Ignore the generated install
@@ -95,7 +96,7 @@ Add another skill without editing YAML by hand:
 agents-config add vercel-labs/agent-browser --skill agent-browser --no-agents
 ```
 
-`add` updates the manifest and installs immediately. To remove that dependency
+`add` updates the manifest, refreshes the lock, and installs immediately. To remove that dependency
 and prune its managed installs:
 
 ```bash
@@ -124,9 +125,10 @@ interop settings, and limitations.
 
 | Command | Action |
 |---|---|
-| `agents-config install` | Sync merged dependencies into enabled targets |
-| `agents-config add <repo>` | Add or update a dependency, then sync |
-| `agents-config remove <repo>` | Remove a dependency, then prune its installs |
+| `agents-config install` | Install locked commits; resolve and create a lock if absent |
+| `agents-config update` | Resolve dependencies, update the lock if needed, then install |
+| `agents-config add <repo>` | Add or change a dependency, then update and install |
+| `agents-config remove <repo>` | Remove a dependency, then update and prune its installs |
 | `agents-config list` | List dependencies, their configuration source, and targets |
 | `agents-config config` | Print resolved config and cache paths |
 

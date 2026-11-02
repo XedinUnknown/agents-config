@@ -86,7 +86,7 @@ test("run/install syncs a project dependency into .agents/ via the default inter
 
     // Removing the dependency prunes what this tool installed.
     await writeFile(join(projectDir, "agents.yaml"), "dependencies: []\n");
-    await install();
+    await container.resolve<() => Promise<void>>("run/update")();
     assert.equal(await pathExists(skillPath), false);
     assert.equal(await pathExists(agentPath), false);
   } finally {
@@ -192,13 +192,13 @@ async function makeSourceRepo(root: string, name: string, skills: Record<string,
   return repo;
 }
 
-function installFor(root: string, projectDir: string) {
+function installFor(root: string, projectDir: string, command = "install") {
   return bootstrapApp({
     cwd: projectDir,
     env: process.env,
     configDirOverride: join(root, "config"),
     cacheDirOverride: join(root, "cache"),
-  }).resolve<() => Promise<void>>("run/install");
+  }).resolve<() => Promise<void>>(`run/${command}`);
 }
 
 test("run/install merges config.yaml defaults with agents.yaml, the later dependency winning a name collision", async () => {
@@ -224,7 +224,8 @@ test("run/install merges config.yaml defaults with agents.yaml, the later depend
     assert.equal(await pathExists(join(projectDir, ".agents")), false);
 
     const lock = JSON.parse(await readFile(join(projectDir, "agents-lock.json"), "utf-8"));
-    assert.deepEqual(lock.skills.shared, { repo: `file://${project}`, ref: "main" });
+    assert.deepEqual(lock.skills.shared, { repo: `file://${project}`, ref: "main", commit:
+      (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: project })).stdout.trim() });
     assert.deepEqual(lock.targets.claude.handler, "claude");
     assert.deepEqual(Object.keys(lock.targets.claude.state.installs).sort(), [join(".claude", "skills", "only-default"), join(".claude", "skills", "shared")]);
     // No per-directory locks any more.
@@ -298,7 +299,7 @@ test("run/install aborts before syncing or saving the lock when a dependency can
             throw new Error("unreachable");
           },
         }),
-      }),
+      }, true),
     /Failed to cache owner\/repo: network unavailable/
   );
   assert.equal(synced, false);
@@ -532,7 +533,7 @@ describe("path dependencies", () => {
       assert.deepEqual((await readLock(projectDir)).skills.own, { path: "." });
 
       await writeFile(join(projectDir, "agents.yaml"), "dependencies: []\n");
-      await installFor(root, projectDir)();
+      await installFor(root, projectDir, "update")();
       assert.equal(await pathExists(installed), false);
       assert.equal(await pathExists(join(projectDir, "skills", "own", "SKILL.md")), true);
     } finally {
@@ -560,7 +561,7 @@ describe("path dependencies", () => {
 
       // Moving the ref updates the install.
       await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: .\n    ref: main\n");
-      await installFor(root, projectDir)();
+      await installFor(root, projectDir, "update")();
       assert.equal(await readFile(join(installed, "SKILL.md"), "utf-8"), "# v2");
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -577,7 +578,7 @@ describe("path dependencies", () => {
       assert.equal((await lstat(join(projectDir, ".agents", "skills", "own"))).isSymbolicLink(), false);
 
       await writeFile(join(projectDir, "agents.yaml"), "dependencies:\n  - path: missing\n");
-      await assert.rejects(() => installFor(root, projectDir)(), /path:missing: .*missing is not a directory/);
+      await assert.rejects(() => installFor(root, projectDir, "update")(), /path:missing: .*missing is not a directory/);
       assert.equal(await pathExists(join(projectDir, ".agents", "skills", "own")), true, "nothing was pruned");
     } finally {
       await rm(root, { recursive: true, force: true });

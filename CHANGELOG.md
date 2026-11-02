@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] YYYY-MM-DD
 
+### Added
+
+- `update` resolves dependencies, updates `agents-lock.json` if needed, then installs.
+
+### Changed
+
+- `install` uses locked Git commits, resolving only when no lockfile exists.
+  Dependency declaration changes and older ownership-only locks require `update`.
+- Git-backed installs use immutable cached snapshots, including link installs.
+  Live path dependencies remain live. `add` and `remove` now update before installing.
+
 ## [0.1.0-beta.1] - 2026-10-25
 
 ### Added

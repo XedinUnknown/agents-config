@@ -131,6 +131,13 @@ export async function ensureRepo(url: string, ref: string, cacheKey: string, cac
   await mkdir(cacheDir, { recursive: true });
 
   if (await dirExists(repoPath)) {
+    if (/^[a-f0-9]{40,64}$/.test(ref)) {
+      try {
+        if (await gitOutput(["rev-parse", "HEAD"], repoPath) === ref) return { success: true, path: repoPath };
+      } catch {
+        // Let the normal fetch report an unusable cache checkout.
+      }
+    }
     return updateRepo(repoPath, ref);
   }
   return cloneRepo(url, ref, repoPath);

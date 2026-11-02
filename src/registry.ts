@@ -52,6 +52,7 @@ export interface HandlerContext {
   /** The requested skills and agents. Empty during cleanup. */
   readonly plan: Plan;
   readonly installMethod: "link" | "copy";
+  readonly manageGitignore: boolean;
   /**
    * This target's record in agents-lock.json, owned and shaped by the
    * handler. Mutate it in place as work is done: it is saved even if sync
@@ -67,6 +68,8 @@ export interface SyncReport {
   removed: string[];
   unchanged: string[];
   warnings: string[];
+  /** Cleanup must be retried before replacing this handler's state. */
+  cleanupBlocked?: string;
 }
 
 export interface TargetHandler {

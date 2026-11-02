@@ -12,8 +12,10 @@
  * Each target's record in agents-lock.json lists every concrete path the
  * handler installed for it, so only those are ever updated or removed.
  */
-import { mkdir, rm, cp, lstat, symlink, readlink, unlink, stat, readdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { mkdir, rm, cp, lstat, symlink, readlink, unlink, stat, readdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, parse, sep } from "node:path";
 import { hashPath } from "./hash.ts";
 import type { Plan, DesiredItem } from "./plan.ts";
 import {
@@ -44,6 +46,117 @@ export interface FileInstall {
 /** A built-in handler's state: its target's record in agents-lock.json. */
 export interface FilesState {
   installs?: Record<string, FileInstall>;
+  ignorePending?: string[];
+  managedIgnoreDirs?: string[];
+}
+
+async function syncIgnores(projectDir: string, targetName: string, state: FilesState, directories: string[], warnings: string[]): Promise<void> {
+  const id = Buffer.from(targetName).toString("base64url");
+  const start = `# BEGIN agents-config MANAGED BLOCK (${id})`;
+  const end = `# END agents-config MANAGED BLOCK (${id})`;
+  const paths = Object.keys(state.installs ?? {});
+  const skipped: string[] = [];
+  for (const dir of directories) {
+    const names = paths.filter((path) => dirname(path) === dir).map((path) => basename(path)).filter((name) => name !== ".gitignore").sort();
+    const root = resolve(projectDir);
+    const destination = resolve(root, dir);
+    const fromRoot = relative(root, destination);
+    let unsafe = isAbsolute(fromRoot) || fromRoot === ".." || fromRoot.startsWith(`..${sep}`);
+    let missing = false;
+    if (!unsafe) {
+      let current = parse(destination).root;
+      for (const part of destination.slice(current.length).split(sep).filter(Boolean)) {
+        current = join(current, part);
+        try {
+          if (!(await lstat(current)).isDirectory()) {
+            unsafe = true;
+            break;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          missing = true;
+          break;
+        }
+      }
+    }
+    if (unsafe) {
+      warnings.push(`${dir}: skipped .gitignore management (outside project or symlink/non-directory ancestor)`);
+      skipped.push(dir);
+      continue;
+    }
+    if (missing) continue;
+    const file = join(destination, ".gitignore");
+    let text: string;
+    let info: Stats | undefined;
+    try {
+      info = await lstat(file);
+      if (!info.isFile()) {
+        warnings.push(`${file}: skipped .gitignore management (symlink or non-regular file)`);
+        skipped.push(dir);
+        continue;
+      }
+      text = await readFile(file, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      text = "";
+    }
+    const lines = text.split(/(?<=\n)/);
+    const blocks = new Map<string, { begin: number; end: number }>();
+    let open: { id: string; begin: number } | undefined;
+    for (const [index, line] of lines.entries()) {
+      const marker = line.replace(/\r?\n$/, "").match(/^# (BEGIN|END) agents-config MANAGED BLOCK \(([A-Za-z0-9_-]+)\)$/);
+      if (!marker) continue;
+      const markerId = marker[2]!;
+      if (marker[1] === "BEGIN") {
+        if (open || blocks.has(markerId)) throw new Error(`${file}: malformed agents-config managed block structure`);
+        open = { id: markerId, begin: index };
+      } else {
+        if (!open || open.id !== markerId) throw new Error(`${file}: malformed agents-config managed block structure`);
+        blocks.set(markerId, { begin: open.begin, end: index });
+        open = undefined;
+      }
+    }
+    if (open) throw new Error(`${file}: malformed agents-config managed block structure`);
+    const block = names.length ? `${start}\n${names.map((name) => `/${name.replace(/[\\*?\[\]#! ]/g, "\\$&")}`).join("\n")}\n${end}\n` : "";
+    const existing = blocks.get(id);
+    let updated: string;
+    if (existing) {
+      updated = lines.slice(0, existing.begin).join("") + block + lines.slice(existing.end + 1).join("");
+    } else {
+      updated = text + (block && text && !text.endsWith("\n") ? "\n" : "") + block;
+    }
+    if (updated !== text) {
+      const temp = join(destination, `.agents-config-${randomUUID()}.tmp`);
+      try {
+        await writeFile(temp, updated, { encoding: "utf8", flag: "wx" });
+        if (info !== undefined) await chmod(temp, info.mode);
+        let current: Stats | undefined;
+        try {
+          current = await lstat(file);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if ((info === undefined) !== (current === undefined) ||
+            (info !== undefined && current !== undefined &&
+              (!current.isFile() || current.dev !== info.dev || current.ino !== info.ino ||
+               current.mode !== info.mode || current.size !== info.size ||
+               current.mtimeMs !== info.mtimeMs || current.ctimeMs !== info.ctimeMs ||
+               await readFile(file, "utf8") !== text))) {
+          throw new Error(`${file}: .gitignore changed during synchronization; retry the install`);
+        }
+        await rename(temp, file);
+      } finally {
+        await rm(temp, { force: true });
+      }
+    }
+  }
+  if (skipped.length) state.ignorePending = skipped;
+  else delete state.ignorePending;
+  const stillInstalled = new Set(Object.keys(state.installs ?? {}).map(dirname));
+  const retained = [...new Set([...directories.filter((dir) => stillInstalled.has(dir) || skipped.includes(dir)), ...skipped])].sort();
+  if (retained.length || skipped.length) state.managedIgnoreDirs = retained;
+  else delete state.managedIgnoreDirs;
+  if (!skipped.length) delete state.ignorePending;
 }
 
 export interface SyncResult {
@@ -55,6 +168,7 @@ export interface SyncResult {
   skippedForeign: string[];
   /** Lock-owned, no longer desired, but changed on disk since install — left in place and still owned. */
   keptModified: string[];
+  warnings: string[];
 }
 
 /** An item to place; `method` overrides the run's install method for this item. */
@@ -179,12 +293,32 @@ export async function syncFiles(
   paths: FilesPaths,
   plan: FileItems,
   installMethod: "link" | "copy",
-  state: FilesState
+  state: FilesState,
+  targetName?: string,
+  manageGitignore = false
 ): Promise<SyncResult> {
-  const result: SyncResult = { added: [], updated: [], removed: [], unchanged: [], skippedForeign: [], keptModified: [] };
+  const result: SyncResult = { added: [], updated: [], removed: [], unchanged: [], skippedForeign: [], keptModified: [], warnings: [] };
   const desired = await placements(paths, plan);
+  if (targetName !== undefined && manageGitignore) {
+    for (const path of [...desired.keys(), ...Object.keys(state.installs ?? {})]) {
+      if (/[\r\n]/.test(basename(path))) throw new Error(`Cannot express ${JSON.stringify(path)} in .gitignore`);
+      if (basename(path) === ".gitignore") throw new Error(`Cannot install over the managed .gitignore: ${path}`);
+    }
+    state.managedIgnoreDirs = [...new Set([
+      ...(state.managedIgnoreDirs ?? []),
+      ...(state.ignorePending ?? []),
+      ...Object.keys(state.installs ?? {}).map(dirname),
+    ])];
+    state.managedIgnoreDirs ??= [];
+  }
   const installs = (state.installs ??= {});
+  const markPending = (path: string) => {
+    if (manageGitignore && targetName !== undefined && !state.managedIgnoreDirs!.includes(dirname(path))) state.managedIgnoreDirs!.push(dirname(path));
+  };
 
+  let installError: unknown;
+  let failed = false;
+  try {
   for (const [path, entry] of Object.entries(installs)) {
     if (desired.has(path)) continue;
     if (await prune(join(projectDir, path), entry)) {
@@ -204,6 +338,7 @@ export async function syncFiles(
       continue;
     }
 
+    markPending(path);
     await mkdir(dirname(abs), { recursive: true });
     const now = new Date().toISOString();
 
@@ -246,7 +381,23 @@ export async function syncFiles(
     else result.added.push(path);
   }
 
+  } catch (error) {
+    failed = true;
+    installError = error;
+  }
   if (Object.keys(installs).length === 0) delete state.installs;
+  try {
+    if (manageGitignore && targetName !== undefined) {
+      const directories = [...new Set([...(state.managedIgnoreDirs ?? []), ...Object.keys(state.installs ?? {}).map(dirname)])].sort();
+      state.managedIgnoreDirs = directories;
+      await syncIgnores(projectDir, targetName, state, directories, result.warnings);
+    }
+  } catch (error) {
+    if (targetName !== undefined && state.managedIgnoreDirs?.length) state.ignorePending = [...state.managedIgnoreDirs];
+    if (failed) throw new AggregateError([installError, error], "Install and .gitignore synchronization both failed");
+    throw error;
+  }
+  if (failed) throw installError;
   return result;
 }
 
@@ -300,15 +451,28 @@ export function flatDirectoryHandler(
         if (reason === undefined) items[kind] = requested[kind];
         else if (requested[kind].length > 0) skipped.push(`${requested[kind].length} ${kind} not installed: ${reason}`);
       }
-      const r = await syncFiles(ctx.projectDir, paths, items, ctx.installMethod, ctx.state as FilesState);
+      const r = await syncFiles(ctx.projectDir, paths, items, ctx.installMethod, ctx.state as FilesState, ctx.targetName, ctx.manageGitignore);
+      const state = ctx.state as FilesState;
+      if (!ctx.enabled && ctx.manageGitignore && !state.installs && !state.managedIgnoreDirs?.length && !state.ignorePending?.length) {
+        delete state.ignorePending;
+        delete state.managedIgnoreDirs;
+      }
       return {
         added: r.added,
         updated: r.updated,
         removed: r.removed,
         unchanged: r.unchanged,
+        ...(!ctx.manageGitignore && (state.managedIgnoreDirs?.length || state.ignorePending?.length)
+          ? { cleanupBlocked: ".gitignore bookkeeping is retained while management is disabled; enable manage_gitignore and retry" }
+          : !ctx.enabled && state.ignorePending?.length
+          ? { cleanupBlocked: ".gitignore cleanup is pending; resolve the reported warnings and retry" }
+          : !ctx.enabled && Object.keys(state.installs ?? {}).length
+          ? { cleanupBlocked: "modified installs remain owned; resolve the reported paths and retry" }
+          : {}),
         warnings: [
           ...r.skippedForeign.map((p) => `${p} already exists and isn't tracked by agents-config — left untouched`),
           ...r.keptModified.map((p) => `${p} is no longer desired but was modified since install — left in place`),
+          ...r.warnings,
           ...skipped,
         ],
       };

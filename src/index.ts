@@ -59,7 +59,15 @@ program
     `
 Settings are layered: config.yaml (machine defaults), then the current
 directory's agents.yaml. Both files share one schema
-(clone_method, install_method, targets, dependencies); later layers win.
+(clone_method, install_method, manage_gitignore, targets, dependencies);
+later layers win.
+
+manage_gitignore is a top-level boolean (default false); the project value
+overrides the machine value. When true, built-in handlers maintain per-target
+.gitignore blocks for lock-owned installs, not foreign items. When false, they
+leave existing blocks untouched, so they may become stale until re-enabled. You may
+clean them up manually; a handler switch may require management enabled to
+finish the old handler's cleanup.
 
 Existing locks pin Git commits. Changes to dependency declarations require
 'agents-config update'; target settings can change without updating dependencies.

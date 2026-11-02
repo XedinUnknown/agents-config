@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir, lstat, readlink } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, access, readFile, readdir, lstat, readlink, rename, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -428,6 +428,71 @@ test("a module adds a handler: it gets the requested skills and its settings, ow
   }
 });
 
+test("removing a custom handler target retains opaque state until that handler clears it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-run-custom-state-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project, { recursive: true });
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const stateful: TargetHandler = {
+      async sync(ctx) {
+        if (ctx.enabled) ctx.state["opaque"] = { nested: [1, 2, 3] };
+        return { added: [], updated: [], removed: [], unchanged: [], warnings: [] };
+      },
+    };
+    const install = installWithModule(root, project, stateful);
+    await writeFile(join(project, "agents.yaml"), `targets:\n  custom:\n    handler: registry\n    file: registry.txt\n${deps}`);
+    await install();
+    await writeFile(join(project, "agents.yaml"), `targets: {}\n${deps}`);
+    await install();
+    assert.deepEqual((await readLock(project)).targets.custom.state, { opaque: { nested: [1, 2, 3] } });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("handler switch retains an empty custom state when cleanup is blocked and retries next run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-run-custom-blocked-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project, { recursive: true });
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    let blockCleanup = true;
+    let cleanupCalls = 0;
+    const custom: TargetHandler = {
+      async sync(ctx) {
+        if (ctx.enabled) ctx.state["opaque"] = "owned";
+        else {
+          cleanupCalls++;
+          delete ctx.state["opaque"];
+        }
+        return {
+          added: [], updated: [], removed: [], unchanged: [], warnings: [],
+          ...(!ctx.enabled && blockCleanup ? { cleanupBlocked: "external cleanup must be retried" } : {}),
+        };
+      },
+    };
+    const install = installWithModule(root, project, custom);
+    await writeFile(join(project, "agents.yaml"), `targets:\n  mine:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await install();
+    await writeFile(join(project, "agents.yaml"), `targets:\n  mine:\n    handler: claude\n${deps}`);
+    await assert.rejects(install(), /external cleanup must be retried/);
+    assert.deepEqual((await readLock(project)).targets.mine, { handler: "registry", state: {} });
+    assert.equal(await pathExists(join(project, ".claude", "skills", "demo")), false);
+
+    blockCleanup = false;
+    await install();
+    assert.equal(cleanupCalls, 2);
+    assert.deepEqual((await readLock(project)).targets.mine.handler, "claude");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("run/install: renaming a target or switching its handler undoes the old install with the handler that made it", async () => {
   const root = await mkdtemp(join(tmpdir(), "agents-config-run-switch-"));
   try {
@@ -456,6 +521,189 @@ test("run/install: renaming a target or switching its handler undoes the old ins
     assert.equal(await pathExists(join(projectDir, "t", "demo")), false);
     assert.equal(await readFile(join(projectDir, "reg.txt"), "utf-8"), "demo");
     assert.deepEqual((await readLock(projectDir)).targets, { ours: { handler: "registry", state: { file: "reg.txt" } } });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("handler switch retains pending ignore cleanup and retries before installing the new handler", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-switch-pending-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const calls: Array<{ target: string; skills: string[]; state: unknown }> = [];
+    const install = installWithModule(root, project, registryHandler(calls));
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: claude\n    paths: { skills: t }\n${deps}`);
+    await install();
+    const ignore = join(project, "t", ".gitignore");
+    const saved = join(project, "saved-ignore");
+    await rename(ignore, saved);
+    await symlink(saved, ignore);
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await assert.rejects(install(), /cannot switch handlers: .gitignore cleanup is pending/);
+    const lock = await readLock(project);
+    assert.equal(lock.targets.ours.handler, "claude");
+    assert.deepEqual(lock.targets.ours.state.ignorePending, ["t"]);
+    assert.equal(await pathExists(join(project, "reg.txt")), false);
+    await rm(ignore);
+    await rename(saved, ignore);
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.equal(await readFile(join(project, "reg.txt"), "utf8"), "demo");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("handler switch retains modified built-in installs and their ignore rules until resolved", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-switch-modified-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const install = installWithModule(root, project, registryHandler([]));
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: claude\n    paths: { skills: t }\n${deps}`);
+    await install();
+    const item = join(project, "t", "demo");
+    const ignore = join(project, "t", ".gitignore");
+    await writeFile(join(item, "SKILL.md"), "modified");
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await assert.rejects(install(), /cannot switch handlers: modified installs remain owned/);
+    const lock = await readLock(project);
+    assert.equal(lock.targets.ours.handler, "claude");
+    assert.ok(lock.targets.ours.state.installs["t/demo"]);
+    assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
+    assert.equal(await readFile(join(item, "SKILL.md"), "utf8"), "modified");
+    assert.equal(await pathExists(join(project, "reg.txt")), false);
+    await rm(item, { recursive: true });
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.equal(await readFile(join(project, "reg.txt"), "utf8"), "demo");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ignore management can be enabled for existing installs, disabled through pruning, then re-enabled to clean recorded directories", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-ignore-opt-in-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const install = installFor(root, project);
+    await writeFile(join(project, "agents.yaml"), `targets:\n  claude: true\n${deps}`);
+    await install();
+    const ignore = join(project, ".claude", "skills", ".gitignore");
+    assert.equal(await pathExists(ignore), false);
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude: true\n${deps}`);
+    await install();
+    assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
+    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: false\ntargets:\n  claude: true\n${deps}`);
+    await install();
+    assert.equal(await readFile(ignore, "utf8").then((text) => text.includes("/demo")), true);
+    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude: true\n${deps}`);
+    await install();
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets: {}\n${deps}`);
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.deepEqual((await readLock(project)).targets, {});
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disabled management preserves old and new destination bookkeeping through prune and cleans both when re-enabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-ignore-move-disabled-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const install = installFor(root, project);
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude:\n    paths: { skills: old/skills }\n${deps}`);
+    await install();
+    const oldIgnore = join(project, "old", "skills", ".gitignore");
+    const newIgnore = join(project, "new", "skills", ".gitignore");
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: false\ntargets:\n  claude:\n    paths: { skills: new/skills }\n${deps}`);
+    await install();
+    assert.match(await readFile(oldIgnore, "utf8"), /\/demo\n/);
+    assert.equal(await pathExists(join(project, "old", "skills", "demo")), false);
+    assert.equal(await pathExists(newIgnore), false);
+    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, ["old/skills"]);
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude:\n    paths: { skills: new/skills }\n${deps}`);
+    await install();
+    assert.equal(await readFile(oldIgnore, "utf8"), "");
+    assert.match(await readFile(newIgnore, "utf8"), /\/demo\n/);
+    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, ["new/skills"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("removed target keeps ignore bookkeeping while disabled and cleans it when management is re-enabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-ignore-target-remove-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const install = installFor(root, project);
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude: true\n${deps}`);
+    await install();
+    const ignore = join(project, ".claude", "skills", ".gitignore");
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: false\ntargets: {}\n${deps}`);
+    await install();
+    assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
+    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets: {}\n${deps}`);
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.deepEqual((await readLock(project)).targets, {});
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("switching handlers cannot discard managed ignore blocks while management is disabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-ignore-switch-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "");
+    const project = join(root, "project");
+    await mkdir(project);
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    const install = installWithModule(root, project, registryHandler([]));
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: claude\n    paths: { skills: t }\n${deps}`);
+    await install();
+    const ignore = join(project, "t", ".gitignore");
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: false\ntargets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await assert.rejects(install(), /enable manage_gitignore/);
+    assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
+    assert.equal(await pathExists(join(project, "reg.txt")), false);
+
+    await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
+    await install();
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.equal(await readFile(join(project, "reg.txt"), "utf8"), "demo");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

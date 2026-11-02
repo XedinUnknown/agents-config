@@ -1,8 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, readlink, access, readdir, rename } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, readlink, access, readdir, rename, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { syncFiles, flatDirectoryHandler, installProvider, type FileItems, type FilesPaths, type FilesState } from "./install.ts";
 import { bootstrap, type Provider } from "./di/index.ts";
 import { hashPath } from "./hash.ts";
@@ -45,6 +47,208 @@ function skill(name: string, sourcePath: string, repo = "owner/repo"): DesiredIt
 }
 
 const FOO = join(".agents", "skills", "foo");
+
+test("managed ignores preserve foreign text and independent targets, including retained modifications", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, ".gitignore"), "# hand written\nlocal\n");
+    const one: FilesState = {};
+    const two: FilesState = {};
+    const a = await makeSourceSkill(project, "first", "a");
+    const b = await makeSourceSkill(project, "second", "b");
+    await syncFiles(project, interop, skillPlan(skill("first", a)), "copy", one, "one", true);
+    await syncFiles(project, interop, skillPlan(skill("second", b)), "copy", two, "two", true);
+    await writeFile(join(dir, "first", "SKILL.md"), "modified");
+    await syncFiles(project, interop, skillPlan(), "copy", one, "one", true);
+    assert.match(await readFile(join(dir, ".gitignore"), "utf8"), /\/first\n/);
+    await syncFiles(project, interop, skillPlan(), "copy", two, "two", true);
+    const remaining = await readFile(join(dir, ".gitignore"), "utf8");
+    assert.ok(remaining.startsWith("# hand written\nlocal\n"));
+    assert.match(remaining, /\/first\n/);
+    assert.doesNotMatch(remaining, /\/second\n/);
+    await rm(join(dir, "first"), { recursive: true });
+    await syncFiles(project, interop, skillPlan(), "copy", one, "one", true);
+    assert.equal(await readFile(join(dir, ".gitignore"), "utf8"), "# hand written\nlocal\n");
+  });
+});
+
+test("managed ignore patterns are literal and do not ignore their own file", async () => {
+  await withTmpDir(async (project) => {
+    const git = promisify(execFile);
+    await git("git", ["init", "-q"], { cwd: project });
+    const name = "#a [b]*?! ";
+    const source = await makeSourceSkill(project, "source", "content");
+    await syncFiles(project, interop, skillPlan(skill(name, source)), "copy", {}, "literal", true);
+    const dir = join(project, ".agents", "skills");
+    await git("git", ["check-ignore", "--", join(dir, name)], { cwd: project });
+    await assert.rejects(git("git", ["check-ignore", "--", join(dir, ".gitignore")], { cwd: project }));
+    await assert.rejects(git("git", ["check-ignore", "--", join(dir, "#a bZZ! ")], { cwd: project }));
+  });
+});
+
+test("user negations after a managed block take precedence and remain in place", async () => {
+  await withTmpDir(async (project) => {
+    const git = promisify(execFile);
+    await git("git", ["init", "-q"], { cwd: project });
+    const source = await makeSourceSkill(project, "foo", "content");
+    const state: FilesState = {};
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    const ignore = join(project, ".agents", "skills", ".gitignore");
+    await writeFile(ignore, (await readFile(ignore, "utf8")) + "!/foo\n");
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    assert.match(await readFile(ignore, "utf8"), /!\/foo\n$/);
+    await assert.rejects(git("git", ["check-ignore", "--", join(project, FOO)], { cwd: project }));
+  });
+});
+
+test("failed ignore updates retain retry state and refuse malformed blocks", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills");
+    await mkdir(dir, { recursive: true });
+    const ignore = join(dir, ".gitignore");
+    await writeFile(ignore, "# BEGIN agents-config MANAGED BLOCK (dGFyZ2V0)\nforeign\n");
+    const state: FilesState = {};
+    const source = await makeSourceSkill(project, "foo", "content");
+    await assert.rejects(syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true), /malformed/);
+    assert.ok(state.installs?.[FOO]);
+    assert.ok(state.managedIgnoreDirs?.length);
+    assert.equal(await readFile(ignore, "utf8"), "# BEGIN agents-config MANAGED BLOCK (dGFyZ2V0)\nforeign\n");
+    await writeFile(ignore, "foreign\n");
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    assert.equal(state.ignorePending, undefined);
+    assert.deepEqual(state.managedIgnoreDirs, [".agents/skills"]);
+    assert.match(await readFile(ignore, "utf8"), /\/foo\n/);
+  });
+});
+
+test("managed ignore synchronization refuses malformed blocks for any target without changing text", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills");
+    await mkdir(dir, { recursive: true });
+    const ignore = join(dir, ".gitignore");
+    const source = await makeSourceSkill(project, "foo", "content");
+    const state: FilesState = {};
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    const a = "dGFyZ2V0";
+    const b = "b3RoZXI";
+    const begin = (id: string) => `# BEGIN agents-config MANAGED BLOCK (${id})\n`;
+    const end = (id: string) => `# END agents-config MANAGED BLOCK (${id})\n`;
+    const cases = [
+      begin(a) + begin(b) + end(b) + end(a),
+      begin(a) + begin(b) + end(a) + end(b),
+      begin(b) + end(b) + begin(b) + end(b),
+      begin(b),
+      end(b),
+      begin(b) + end(a),
+    ];
+    for (const text of cases) {
+      await writeFile(ignore, text);
+      await assert.rejects(syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true), /malformed/);
+      assert.equal(await readFile(ignore, "utf8"), text);
+      assert.ok(state.managedIgnoreDirs?.length);
+    }
+  });
+});
+
+test("ignore management skips symlink ancestors, outside directories and symlink ignore files", async () => {
+  await withTmpDir(async (root) => {
+    const project = join(root, "project");
+    const outside = join(root, "outside");
+    await mkdir(project);
+    await mkdir(outside);
+    await symlink(outside, join(project, "linked"));
+    const source = await makeSourceSkill(project, "source", "content");
+    const state: FilesState = {};
+    const result = await syncFiles(project, { skills: "linked", agents: "linked" }, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    assert.match(result.warnings[0]!, /skipped.*symlink/);
+    assert.equal(await pathExists(join(outside, ".gitignore")), false);
+    assert.ok(state.ignorePending?.includes("linked"));
+
+    const outsideResult = await syncFiles(project, { skills: "../outside", agents: "../outside" }, skillPlan(skill("bar", source)), "copy", {}, "other", true);
+    assert.match(outsideResult.warnings[0]!, /outside project/);
+    assert.equal(await pathExists(join(outside, ".gitignore")), false);
+
+    const local = join(project, "local");
+    await mkdir(local);
+    const foreign = join(root, "foreign-ignore");
+    await writeFile(foreign, "untouched\n");
+    await symlink(foreign, join(local, ".gitignore"));
+    const result2 = await syncFiles(project, { skills: "local", agents: "local" }, skillPlan(skill("foo", source)), "copy", {}, "third", true);
+    assert.match(result2.warnings[0]!, /symlink/);
+    assert.equal(await readFile(foreign, "utf8"), "untouched\n");
+  });
+});
+
+test("foreign-only destinations do not create ignore files or pending state", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills", "foo");
+    await mkdir(dir, { recursive: true });
+    const source = await makeSourceSkill(project, "source", "content");
+    const state: FilesState = {};
+    const result = await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    assert.deepEqual(result.skippedForeign, [FOO]);
+    assert.deepEqual(state, {});
+    assert.equal(await pathExists(join(project, ".agents", "skills", ".gitignore")), false);
+  });
+});
+
+test("disabled ignore management neither reads nor writes ignore files or records bookkeeping", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills");
+    await mkdir(dir, { recursive: true });
+    const ignore = join(dir, ".gitignore");
+    const content = "# user content\n";
+    await writeFile(ignore, content);
+    const source = await makeSourceSkill(project, "foo", "content");
+    const state: FilesState = {};
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", false);
+    assert.equal(await readFile(ignore, "utf8"), content);
+    assert.equal(state.managedIgnoreDirs, undefined);
+    assert.equal(state.ignorePending, undefined);
+  });
+});
+
+test("disabled ignore management does not parse malformed gitignore content", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills");
+    await mkdir(dir, { recursive: true });
+    const ignore = join(dir, ".gitignore");
+    const malformed = "# BEGIN agents-config MANAGED BLOCK (bad)\n";
+    await writeFile(ignore, malformed);
+    const source = await makeSourceSkill(project, "foo", "content");
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", {}, "target", false);
+    assert.equal(await readFile(ignore, "utf8"), malformed);
+  });
+});
+
+test("preexisting ignorePending directories are reconciled and cleared", async () => {
+  await withTmpDir(async (project) => {
+    const dir = join(project, ".agents", "skills");
+    await mkdir(dir, { recursive: true });
+    const ignore = join(dir, ".gitignore");
+    await writeFile(ignore, "# BEGIN agents-config MANAGED BLOCK (dGFyZ2V0)\n/foo\n# END agents-config MANAGED BLOCK (dGFyZ2V0)\n");
+    const state: FilesState = { ignorePending: [".agents/skills"] };
+    await syncFiles(project, interop, skillPlan(), "copy", state, "target", true);
+    assert.equal(await readFile(ignore, "utf8"), "");
+    assert.deepEqual(state, {});
+  });
+});
+
+test("simultaneous install and ignore errors preserve both causes", async () => {
+  await withTmpDir(async (project) => {
+    const state: FilesState = {};
+    const source = await makeSourceSkill(project, "foo", "content");
+    await syncFiles(project, interop, skillPlan(skill("foo", source)), "copy", state, "target", true);
+    await writeFile(join(project, ".agents", "skills", ".gitignore"), "# BEGIN agents-config MANAGED BLOCK (dGFyZ2V0)\n");
+    await assert.rejects(
+      syncFiles(project, interop, skillPlan(skill("foo", join(project, "missing"))), "copy", state, "target", true),
+      (error: unknown) => error instanceof AggregateError && error.errors.length === 2 &&
+        (error.errors[0] as NodeJS.ErrnoException).code === "ENOENT" && /malformed/.test(String(error.errors[1]))
+    );
+    assert.ok(state.ignorePending?.length);
+  });
+});
 
 test("syncFiles (copy): installs into the target and records winners and the concrete path", async () => {
   await withTmpDir(async (project) => {
@@ -218,6 +422,7 @@ test("flatDirectoryHandler uses its own defaults for absent or null paths, and c
         options,
         plan: skillPlan(skill("foo", src)),
         installMethod: "copy",
+        manageGitignore: true,
         state: {},
       });
 
@@ -247,6 +452,7 @@ test("flatDirectoryHandler rejects malformed paths before anything runs, and rep
       options: {},
       plan: skillPlan(skill("foo", src)),
       installMethod: "copy",
+      manageGitignore: true,
       state,
     });
     const path = join(".x", "skills", "foo");
@@ -304,6 +510,7 @@ describe("interop harness handlers", () => {
     options,
     plan,
     installMethod: "copy" as const,
+    manageGitignore: true,
     state: state as Record<string, unknown>,
   });
 

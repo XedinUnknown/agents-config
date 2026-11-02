@@ -9,6 +9,7 @@ test("parseLayer reads the shared schema", () => {
     [
       "clone_method: ssh",
       "install_method: link",
+      "manage_gitignore: true",
       "targets:",
       "  claude: true",
       "  interop: false",
@@ -22,6 +23,7 @@ test("parseLayer reads the shared schema", () => {
   assert.deepEqual(layer, {
     clone_method: "ssh",
     install_method: "link",
+    manage_gitignore: true,
     targets: { claude: true, interop: false, "agents-root": { paths: { skills: "skills", agents: "agents" } } },
     dependencies: [{ repo: "owner/repo", ref: "main", skills: "*", agents: "*" }],
   });
@@ -54,6 +56,7 @@ test("parseLayer normalizes dependency defaults and explicit selections", () => 
 test("parseLayer rejects invalid values, naming the source file", () => {
   assert.throws(() => parseLayer("clone_method: ftp\n", "x.yaml"), /x\.yaml: invalid clone_method/);
   assert.throws(() => parseLayer("install_method: move\n", "x.yaml"), /invalid install_method/);
+  assert.throws(() => parseLayer("manage_gitignore: yes\n", "x.yaml"), /invalid manage_gitignore/);
   assert.throws(() => parseLayer("targets: [claude]\n", "x.yaml"), /'targets' must be a map/);
   assert.throws(() => parseLayer("targets:\n  foo: [a]\n", "x.yaml"), /target 'foo' must be/);
   assert.throws(() => parseLayer("targets:\n  foo:\n    handler: 1\n", "x.yaml"), /handler must be a non-empty string/);
@@ -132,9 +135,16 @@ test("mergeLayers: naming a different handler starts that target's settings fres
 test("mergeLayers: scalars replace, later layer wins; defaults are https/copy", () => {
   assert.equal(mergeLayers([]).clone_method, "https");
   assert.equal(mergeLayers([]).install_method, "copy");
+  assert.equal(mergeLayers([]).manage_gitignore, false);
   const settings = mergeLayers([{ clone_method: "ssh", install_method: "link" }, { install_method: "copy" }]);
   assert.equal(settings.clone_method, "ssh");
   assert.equal(settings.install_method, "copy");
+});
+
+test("mergeLayers: manage_gitignore is a scalar with project-over-machine precedence", () => {
+  assert.equal(mergeLayers([{ manage_gitignore: true }, {}]).manage_gitignore, true);
+  assert.equal(mergeLayers([{ manage_gitignore: true }, { manage_gitignore: false }]).manage_gitignore, false);
+  assert.equal(mergeLayers([{ manage_gitignore: false }, { manage_gitignore: true }]).manage_gitignore, true);
 });
 
 test("mergeLayers: a later entry for the same repo replaces the earlier one in place; new repos append", () => {

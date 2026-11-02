@@ -12,11 +12,13 @@ The machine configuration normally lives at
 `~/.config/agents-config/config.yaml`, or
 `$XDG_CONFIG_HOME/agents-config/config.yaml` when `XDG_CONFIG_HOME` is set.
 
-For a shared setup across Claude Code, OpenCode, and Codex:
+For a shared setup across Claude Code, OpenCode, and Codex, use this recommended
+machine configuration, which enables per-item Git ignore management:
 
 ```yaml
 clone_method: https
 install_method: copy
+manage_gitignore: true
 targets:
   interop: true
   claude-interop: true
@@ -30,6 +32,9 @@ and `--cache-dir <dir>` override them for one invocation. The repository cache
 defaults to `$XDG_CACHE_HOME/agents-config/repos`, or
 `~/.cache/agents-config/repos` when unset.
 
+`manage_gitignore` defaults to `false` if omitted. Set it to `false` in a
+project's `agents.yaml` to override this machine-wide recommendation.
+
 All destination paths are relative to the current project. There is no separate
 global mode: a machine-wide configuration directory can be treated as its own
 project with custom destination paths.
@@ -39,6 +44,7 @@ project with custom destination paths.
 ```yaml
 clone_method: https
 install_method: copy
+manage_gitignore: true
 targets:
   claude: true
 dependencies:
@@ -52,6 +58,9 @@ dependencies:
 
 - `clone_method` is `https` (default) or `ssh`; project values replace defaults.
 - `install_method` is `copy` (default) or `link`.
+- `manage_gitignore` is `false` by default. Set it to `true` to have built-in
+  handlers maintain managed ignore blocks. As a scalar, a project value in
+  `agents.yaml` overrides the machine value in `config.yaml`.
 - `targets` merge by name. `true` enables a target, `false` disables an
   inherited one, and a map adds or overrides settings by key.
 - Changing a target's explicit `handler` starts its settings fresh. Absent or
@@ -126,9 +135,40 @@ This uses the repository cache like any other `repo` dependency and does not
 include uncommitted working-tree edits. Existing `path` dependencies with `ref`
 must either remove `ref` to become live or switch to a repository URI.
 
-Ignore generated install directories as a whole while tracking source skills,
-`agents.yaml`, and `agents-lock.json`. Automatic `.gitignore` maintenance is
-not implemented.
+## Git Ignore Management
+
+When `manage_gitignore: true`, built-in handlers maintain a marked block per
+target in each destination directory's `.gitignore`, listing that target's
+lock-owned installed names as literal, directory-relative patterns. Copies and links are covered, including
+modified stale items retained during cleanup. Foreign items are not added.
+Blocks are updated or removed as ownership changes; text outside the target's
+block and blocks for other targets are preserved. Recognized markers with
+malformed, overlapping, nested, or duplicate blocks cause an error rather than
+being overwritten. With management enabled, names containing a carriage return
+or newline, and installs named `.gitignore`, are rejected.
+
+When disabled, handlers leave `.gitignore` files and existing managed blocks
+untouched. Those blocks can become stale as installs change or are removed and
+remain so until management is re-enabled. Users may clean up stale blocks
+manually. If changing a target to a different handler, enable ignore management
+for cleanup when the old built-in handler has ignore cleanup pending.
+
+Git ignore rules do not untrack files already in Git, and cannot override an
+ignore rule on a parent directory. Later user rules can override a managed
+pattern. Review existing tracking and ignore rules when adopting this feature.
+The generated `.gitignore` does not ignore itself;
+track it if the rules should be shared, along with `agents.yaml`,
+`agents-lock.json`, and authored source. Removing the last block can leave an
+empty `.gitignore` file; the tool does not delete it.
+
+Ignore management is skipped with a warning for destinations outside the
+project, paths with a symlink or non-directory ancestor, and `.gitignore` files
+that are symlinks or not regular files. Installation can still take place at
+those destinations; manage their ignore rules separately. Skipped updates are
+retained for retry. A switch to a different handler is blocked while the old
+built-in handler has pending ignore cleanup or retains modified owned installs;
+resolve the reported paths or warnings and retry the switch.
+Custom handlers are responsible for their own ignore rules.
 
 ## Targets and Interop
 

@@ -90,8 +90,8 @@ Sources expose skills under `skills/<name>/SKILL.md` and agents under `agents/`.
 
 ## Local Dependencies
 
-A project's own skills belong in source directories such as `skills/` and
-`agents/`, not in generated install directories:
+To manage skills or agents authored in this repository, keep their source in
+`skills/<name>/SKILL.md` or `agents/` and declare `path: .`:
 
 ```yaml
 dependencies:
@@ -105,10 +105,17 @@ dependencies:
 `ref`, it reads the directory live and links by default, so edits are visible
 immediately. It pins nothing independently of the project's own version control.
 
-With `ref`, it resolves a Git commit, extracts a snapshot with `git archive`,
-records the resolved commit, and follows `install_method` like a repository.
-Uncommitted changes and files marked `export-ignore` in `.gitattributes` are
-excluded from the snapshot.
+The source directories are distinct from destinations such as `.agents/skills`
+and `.claude/skills`. Those destinations hold installed copies or links managed
+by the tool. Keeping source separate lets you ignore generated installs without
+ignoring the files you author. This convention applies to local dependencies;
+you don't need source directories when installing only third-party skills.
+
+With `ref`, the tool reads the requested Git revision rather than the live
+directory. It uses `git archive` to extract that revision into the cache without
+switching your working tree or including uncommitted edits. It records the
+resolved commit and follows `install_method` like a repository. Files marked
+`export-ignore` in `.gitattributes` are excluded from the snapshot.
 
 Ignore generated install directories as a whole while tracking source skills,
 `agents.yaml`, and `agents-lock.json`. Automatic `.gitignore` maintenance is
@@ -140,7 +147,8 @@ symlink for the entire skills directory. For example:
 .claude/skills/gr-readme -> ../../.agents/skills/gr-readme
 ```
 
-For kinds a harness cannot read natively, `unsupported: symlink` (default)
+For kinds a harness cannot read directly from the shared `.agents/skills` or
+`.agents/agents` directory, `unsupported: symlink` (default)
 mirrors every shared entry individually, installed or hand-written.
 `unsupported: install` installs the requested items as the plain handler would,
 following `install_method`. Requested items absent from shared directories are

@@ -120,7 +120,7 @@ function reportSync(target: string, report: SyncReport): void {
     ["removed", report.removed],
   ];
   for (const [verb, items] of lines) {
-    for (const item of items) console.log(`    [${target}] ${verb} ${item}`);
+    if (items.length > 0) console.log(`    [${target}] ${verb} ${items.length} item${items.length === 1 ? "" : "s"}`);
   }
   for (const warning of report.warnings) {
     console.warn(`    ⚠ [${target}] ${warning}`);

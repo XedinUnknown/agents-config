@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] YYYY-MM-DD
 
+### Changed
+
+- Installation output summarizes added, updated, and removed items by count per
+  target instead of listing every skill and agent. Warnings remain detailed.
+
 ## [0.1.0-beta.1] - 2026-10-25
 
 ### Added

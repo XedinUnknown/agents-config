@@ -1,0 +1,62 @@
+{
+  "version": 2,
+  "skills": {
+    "gr-readme": {
+      "repo": "Gingiris-1031/gingiris-skills",
+      "ref": "b86ee95484f7bb25d333b6424417f970b70f3bce"
+    },
+    "github-presence": {
+      "repo": "jonathimer/devmarketing-skills",
+      "ref": "main"
+    }
+  },
+  "agents": {},
+  "targets": {
+    "interop": {
+      "handler": "interop",
+      "state": {
+        "installs": {
+          ".agents/skills/gr-readme": {
+            "kind": "skills",
+            "name": "gr-readme",
+            "method": "copy",
+            "contentHash": "216b378db92c651d1c8812d4449ddbe3f757ef66f44f8ac79a36edb062ad2c01",
+            "installedAt": "2026-11-02T11:34:07.255Z",
+            "updatedAt": "2026-11-02T11:34:07.255Z"
+          },
+          ".agents/skills/github-presence": {
+            "kind": "skills",
+            "name": "github-presence",
+            "method": "copy",
+            "contentHash": "8d15cdbc1965f36b9cfa66f99c03707196ed3f9946a0834ff5a39e14636992b2",
+            "installedAt": "2026-11-02T11:34:13.736Z",
+            "updatedAt": "2026-11-02T11:34:13.736Z"
+          }
+        }
+      }
+    },
+    "claude-interop": {
+      "handler": "claude-interop",
+      "state": {
+        "installs": {
+          ".claude/skills/gr-readme": {
+            "kind": "skills",
+            "name": "gr-readme",
+            "method": "link",
+            "contentHash": "",
+            "installedAt": "2026-11-02T11:34:07.259Z",
+            "updatedAt": "2026-11-02T11:34:07.259Z"
+          },
+          ".claude/skills/github-presence": {
+            "kind": "skills",
+            "name": "github-presence",
+            "method": "link",
+            "contentHash": "",
+            "installedAt": "2026-11-02T11:34:13.739Z",
+            "updatedAt": "2026-11-02T11:34:13.739Z"
+          }
+        }
+      }
+    }
+  }
+}

@@ -44,7 +44,7 @@ check: typecheck test ## Typecheck and test
 .PHONY: pack
 pack: $(PACKAGE) ## Build the npm package tarball
 
-$(PACKAGE): dist/index.js package.json README.md CHANGELOG.md
+$(PACKAGE): dist/index.js package.json README.md CHANGELOG.md CONTRIBUTING.md ARCHITECTURE.md docs/configuration.md
 	npm pack --ignore-scripts
 
 .PHONY: clean

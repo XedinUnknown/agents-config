@@ -3,9 +3,10 @@
  * keyed by owner-repo-ref so distinct refs of the same repo cache
  * independently.
  */
-import { mkdir, rm, stat as fsStat } from "node:fs/promises";
+import { mkdir, rm, rename, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import type { Container, Provider } from "./di/index.ts";
 
@@ -130,12 +131,67 @@ export async function ensureRepo(url: string, ref: string, cacheKey: string, cac
   await mkdir(cacheDir, { recursive: true });
 
   if (await dirExists(repoPath)) {
+    if (/^[a-f0-9]{40,64}$/.test(ref)) {
+      try {
+        if (await gitOutput(["rev-parse", "HEAD"], repoPath) === ref) return { success: true, path: repoPath };
+      } catch {
+        // Let the normal fetch report an unusable cache checkout.
+      }
+    }
     return updateRepo(repoPath, ref);
   }
   return cloneRepo(url, ref, repoPath);
 }
 
 export type EnsureRepoFn = (url: string, ref: string, cacheKey: string) => Promise<RepoResult>;
+
+export interface SnapshotResult extends RepoResult {
+  commit: string;
+}
+
+export type SnapshotRepoFn = (repoPath: string, ref: string) => Promise<SnapshotResult>;
+
+async function gitOutput(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, { cwd });
+  return stdout.trim();
+}
+
+/** Extract a repository commit once, keeping linked installs independent of moving refs. */
+export async function snapshotRepo(repoPath: string, ref: string, cacheDir: string): Promise<SnapshotResult> {
+  let commit = "";
+  let partial: string | undefined;
+  try {
+    commit = await gitOutput(["rev-parse", "--verify", `${ref}^{commit}`], repoPath);
+    const repoId = createHash("sha256").update(repoPath).digest("hex").slice(0, 12);
+    const snapshot = join(cacheDir, `repo-${repoId}-${commit}`);
+    if (!(await dirExists(snapshot))) {
+      partial = `${snapshot}.partial-${process.pid}`;
+      await rm(partial, { recursive: true, force: true });
+      await mkdir(partial, { recursive: true });
+      const dest = partial;
+      await new Promise<void>((resolve, reject) => {
+        const git = spawn("git", ["archive", "--format=tar", commit], { cwd: repoPath });
+        const tar = spawn("tar", ["-x", "-C", dest]);
+        let stderr = "";
+        git.stderr.on("data", (data) => (stderr += data));
+        tar.stderr.on("data", (data) => (stderr += data));
+        git.on("error", reject);
+        tar.on("error", reject);
+        git.stdout.pipe(tar.stdin);
+        const exited = (process: ReturnType<typeof spawn>) =>
+          new Promise<number | null>((done) => process.on("close", done));
+        Promise.all([exited(git), exited(tar)]).then(([g, t]) =>
+          g === 0 && t === 0 ? resolve() : reject(new Error(stderr.trim() || `git archive exited ${g}, tar ${t}`))
+        );
+      });
+      await rename(partial, snapshot);
+    }
+    return { success: true, path: snapshot, commit };
+  } catch (error) {
+    if (partial !== undefined) await rm(partial, { recursive: true, force: true });
+    return { success: false, path: repoPath, commit, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 /**
  * Provider contributing repo/git operations as keyed definitions:
@@ -148,6 +204,10 @@ export function repoProvider(): Provider {
   return {
     definitions: {
       "repo/gitAvailable": () => checkGitAvailable(),
+      "repo/snapshot": (c: Container): SnapshotRepoFn => {
+        const cacheDir = c.resolve<string>("config/cacheDir");
+        return (repoPath, ref) => snapshotRepo(repoPath, ref, cacheDir);
+      },
       "repo/ensure": (c: Container): EnsureRepoFn => {
         const cacheDir = c.resolve<string>("config/cacheDir");
         return async (url, ref, cacheKey) => {

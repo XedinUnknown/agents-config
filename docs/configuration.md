@@ -79,8 +79,9 @@ dependencies:
     agents: false
 ```
 
-`ref` defaults to `main` and accepts a branch, tag, or commit SHA. Branch refs
-are updated on subsequent installs; use a commit SHA to pin the content.
+`ref` defaults to `main` and accepts a branch, tag, or commit SHA. `update`
+resolves it to a commit recorded in the lock; `install` reuses that commit
+even if the branch or tag has moved.
 
 `skills` and `agents` accept a list, `"*"`/`true` for everything, or `false` for
 nothing. Set `agents: false` for skill-only dependencies. A dependency's
@@ -203,12 +204,28 @@ target paths: built-in handlers treat another target's installed items as foreig
 Built-in handlers update or remove only lock-owned paths. Existing unmanaged
 paths are left alone and conflicts are reported.
 
+`install` uses locked dependency declarations and commits. With no lockfile,
+it resolves the merged dependencies and creates one. `update` resolves the
+current merged declarations, writes the lock only if its contents change,
+then installs. Commit the lockfile for reproducible Git dependencies.
+
+Changes to dependency declarations in either settings layer require `update`;
+`install` aborts with a hint instead of silently changing resolutions. Target
+settings and the run's install method can change without updating dependencies.
+Live `path` dependencies remain live and reject `ref`; use a `file://` repository
+dependency for a versioned local source.
+Older locks without dependency resolutions require one `update`, preserving
+their existing ownership records. `add` and `remove` run a full update after
+editing the manifest, so they may also advance other dependencies.
+
 Desired managed copies are restored when missing or modified. Stale installs
 are pruned when selections, dependencies, targets, or destination paths change;
 stale modified copies are preserved with a warning. A later source taking over
 the same installed name updates that destination rather than removing it.
 
-`install_method: link` links individual items to their source instead of copying.
+`install_method: link` links individual items instead of copying. Git-backed
+sources use immutable cached snapshots, so another project's update cannot
+change an existing linked install. Git snapshots exclude `export-ignore` files.
 Dependency resolution failures abort before installed content is changed.
 See [Architecture](../ARCHITECTURE.md#ownership-and-cleanup) for ownership,
 hashing, and cleanup details.

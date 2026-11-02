@@ -217,19 +217,13 @@ migrated first.
 
 ## Features
 
-Commands: `install`, `add <repo>`, `remove <repo>`, `list`, `config`. Global
-options: `-c/--config <dir>`, `--cache-dir <dir>`. Run `agents-config --help`
-or `agents-config <command> --help` for the authoritative flag/default
-reference — don't duplicate that shape here; document CLI usage in the CLI's
-own help text, not this file.
+Document command behavior in CLI help and [Configuration](./docs/configuration.md),
+and lockfile structure and orchestration in [Architecture](./ARCHITECTURE.md).
+Do not duplicate those references in agent instructions.
 
 Design notes not obvious from `--help` (see `install --help` for the
 `interop`-default behavior itself):
 
-- `install` re-running always prunes stale installs, even when a manifest's
-  `dependencies` list is now empty (`syncDir` still runs with an empty
-  desired-set rather than short-circuiting — an earlier version of `runInstall`
-  short-circuited here, which was a bug; see Progress).
 - `add` is flag-driven only, by design, not as a scope cut: the manifest
   already says which repo and which skills/agents declaratively, so there's
   nothing left for an interactive picker to resolve.

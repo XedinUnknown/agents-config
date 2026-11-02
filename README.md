@@ -133,13 +133,11 @@ Fields:
     A bare filesystem path is rejected: use `path`, or `file://` for a
     repository.
   - `path` is a folder with the standard `skills/` + `agents/` layout,
-    relative to the project (or absolute). Without `ref` it is read live
-    from disk and linked by default, so edits show up immediately. With
-    `ref` it is read from git at that revision (uncommitted changes
-    excluded), pinned to the resolved commit in `agents-lock.json`, and
-    follows `install_method` like a repo. It is read with `git archive`, so
-    files the repository marks `export-ignore` in `.gitattributes` are left
-    out.
+    relative to the project (or absolute). It is always read live from disk
+    and linked by default, so edits show up immediately. It does not require
+    Git or a Git repository and does not accept `ref`. Set `install_method:
+    copy` on the dependency to copy instead. For a versioned local repository,
+    use `repo: file:///absolute/path/to/repository` with `ref`.
   - `skills` and `agents` accept a list, `"*"`/`true` for everything, or
     `false` for nothing. `install_method` overrides the run's install method
     for one dependency.
@@ -149,7 +147,7 @@ as any repository installed from, and are installed like any dependency:
 
 ```yaml
 dependencies:
-  - path: .          # live; or add `ref: v1.2` to pin a revision
+  - path: .          # always live; linked by default
   - repo: anthropics/skills
     skills: [skill-creator]
 ```

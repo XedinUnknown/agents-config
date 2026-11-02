@@ -1,8 +1,10 @@
 # agents-config
 
-See [README.md](./README.md) for user-facing usage and configuration. This
-file covers design rationale, constraints, and current implementation state
-for anyone (human or agent) working on the tool itself.
+See [README.md](./README.md) for user-facing usage,
+[CONTRIBUTING.md](./CONTRIBUTING.md) for development workflows, and
+[ARCHITECTURE.md](./ARCHITECTURE.md) for implementation structure. This file
+covers design rationale, constraints, and current implementation state for
+anyone (human or agent) working on the tool itself.
 
 ## Purpose
 
@@ -369,12 +371,18 @@ Design notes not obvious from `--help` (see `install --help` for the
       Codex lists the probe skill from `.agents/skills`, Claude Code
       (`claude -p`) sees both the probe skill and agent through the links,
       and disabling `claude-interop` removes only its links.
-- [ ] Not yet wired into `~/.agents`'s *real* `agents.yaml` / `config.yaml`
-      (only isolated copies were run; the real `config.yaml` still uses
-      `agents`/`custom_agents` and must be migrated to `targets` first), and the old
-      `~/.agents/skills/_agentdeps_managed/` directory has NOT been touched.
-      Do not clean it up until a real (non-sandboxed) install run against the
-      actual `~/.agents` is confirmed working.
+- [x] Wired into `~/.agents`'s *real* `agents.yaml` / `config.yaml`. Both now
+      use `targets` (`agents-root` with `handler: interop`, config.yaml's
+      `interop`/`claude-interop`/`codex-interop` disabled there). Verified
+      2026-10-31 with the real mise-installed binary against the real
+      directory: `install` fetched all four real dependencies, repaired one
+      drifted copy (`agent-browser`), a second run was a true no-op, `list`
+      reported all four correctly, and this very OpenCode/Claude session's
+      own available-skills list (via the `~/.claude/skills` →
+      `~/.agents/skills` symlink) confirmed `skill-creator`, `agent-browser`,
+      `config-based-modularity`, and `gabs-mcp` are all discovered in
+      practice. The old `~/.agents/skills/_agentdeps_managed/` directory is
+      already gone (no separate cleanup needed).
 - [ ] `codex` harness entry unverified (see Constraints).
 - [ ] Roadmap: keep installed content out of a project's git automatically —
       e.g. maintain a marked block in the project's `.gitignore` listing the

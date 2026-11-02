@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { bootstrapApp } from "./app.ts";
 import { runInstall } from "./run.ts";
 import { emptyLock } from "./lockfile.ts";
-import type { TargetHandler } from "./registry.ts";
+import type { SyncReport, TargetHandler } from "./registry.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -271,6 +271,53 @@ test("run/install with a legacy agents key aborts without touching the project",
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("run/install reports counts instead of item names, preserves warnings, and keeps no-op syncs quiet", async (t) => {
+  const logs: string[] = [];
+  const warnings: string[] = [];
+  t.mock.method(console, "log", (message: string) => logs.push(message));
+  t.mock.method(console, "warn", (message: string) => warnings.push(message));
+  const report: SyncReport = {
+    added: [".agents/skills/first", ".agents/skills/second", ".agents/agents/helper.md"],
+    updated: [".agents/skills/changed"],
+    removed: [".agents/skills/old", ".agents/agents/retired.md"],
+    unchanged: [".agents/skills/untouched"],
+    warnings: ["foreign content left untouched: .agents/skills/foreign"],
+  };
+  const install = () => runInstall({ targets: { interop: true } }, "/tmp/project", {
+    ensureRepo: async () => { throw new Error("unused"); },
+    snapshotPath: async () => { throw new Error("unused"); },
+    isDirectory: async () => true,
+    discoverSkills: async () => [],
+    discoverAgents: async () => [],
+    filterItems: () => ({ selected: [], missing: [] }),
+    manifestExists: async (path) => path.endsWith("agents.yaml"),
+    loadManifest: async () => ({}),
+    loadLock: async () => emptyLock(),
+    saveLock: async () => {},
+    getHandler: () => ({ sync: async () => report }),
+  });
+
+  await install();
+  assert.deepEqual(logs, [
+    "No dependencies defined.",
+    "  targets: interop",
+    "    [interop] added 3 items",
+    "    [interop] updated 1 item",
+    "    [interop] removed 2 items",
+    "\nInstall complete",
+  ]);
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0]?.endsWith(`[interop] ${report.warnings[0]}`));
+
+  logs.length = 0;
+  report.added = [];
+  report.updated = [];
+  report.removed = [];
+  report.warnings = [];
+  await install();
+  assert.deepEqual(logs, ["No dependencies defined.", "  targets: interop", "\nInstall complete"]);
 });
 
 test("run/install aborts before syncing or saving the lock when a dependency cannot be fetched", async () => {

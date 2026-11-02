@@ -1,0 +1,10 @@
+dependencies:
+  - repo: Gingiris-1031/gingiris-skills
+    ref: b86ee95484f7bb25d333b6424417f970b70f3bce # before the paid-pack ad was added
+    skills:
+      - gr-readme
+    agents: false
+  - repo: jonathimer/devmarketing-skills
+    skills:
+      - github-presence
+    agents: false

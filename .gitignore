@@ -3,3 +3,9 @@ node_modules/
 .idea/
 dist/
 *.tgz
+
+# Installed skills and harness mirrors; keep agents.yaml and agents-lock.json tracked.
+/.agents/skills/
+/.claude/skills/
+/.opencode/skills/
+/.codex/skills/

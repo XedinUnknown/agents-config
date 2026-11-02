@@ -10,7 +10,7 @@
  */
 import { join, resolve } from "node:path";
 import { stat } from "node:fs/promises";
-import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn, type SnapshotPathFn } from "./cache.ts";
+import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn } from "./cache.ts";
 import { dependencyLabel, isPathDependency, mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
 import type { DiscoveredItem } from "./discovery.ts";
 import { buildPlan, type Origin, type Plan, type ResolvedDep } from "./plan.ts";
@@ -26,7 +26,6 @@ type FilterItemsFn = (
 /** Everything `runInstall` needs from outside itself, resolved once by `run/install`'s factory. */
 export interface RunServices {
   ensureRepo: EnsureRepoFn;
-  snapshotPath: SnapshotPathFn;
   isDirectory: (path: string) => Promise<boolean>;
   discoverSkills: (repoPath: string) => Promise<DiscoveredItem[]>;
   discoverAgents: (repoPath: string) => Promise<DiscoveredItem[]>;
@@ -57,16 +56,9 @@ async function fetchDep(
   }
 
   const folder = resolve(cwd, dep.path);
-  if (dep.ref === undefined) {
-    if (!(await services.isDirectory(folder))) throw new Error(`${label}: ${folder} is not a directory`);
-    // A live folder is linked by default, so edits show up immediately.
-    return { dir: folder, origin: { path: dep.path }, method: dep.install_method ?? "link" };
-  }
-
-  console.log(`  reading ${label} at ${dep.ref}`);
-  const snapshot = await services.snapshotPath(folder, dep.ref);
-  if (!snapshot.success) throw new Error(`Failed to read ${label} at ${dep.ref}: ${snapshot.error ?? "unknown error"}`);
-  return { dir: snapshot.path, origin: { path: dep.path, ref: dep.ref, commit: snapshot.commit }, ...override };
+  if (!(await services.isDirectory(folder))) throw new Error(`${label}: ${folder} is not a directory`);
+  // A live folder is linked by default, so edits show up immediately.
+  return { dir: folder, origin: { path: dep.path }, method: dep.install_method ?? "link" };
 }
 
 async function resolveDeps(
@@ -269,7 +261,6 @@ export function runProvider(): Provider {
 
         const services: RunServices = {
           ensureRepo: c.resolve<EnsureRepoFn>("repo/ensure"),
-          snapshotPath: c.resolve<SnapshotPathFn>("repo/snapshot"),
           isDirectory: async (path) => {
             try {
               return (await stat(path)).isDirectory();

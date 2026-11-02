@@ -48,8 +48,10 @@ See [CHANGELOG.md](./CHANGELOG.md) for what changed in each release.
 
 1. Merge settings layers: `config.yaml` (machine defaults), then the
    current directory's `agents.yaml`.
-2. Clone or update each merged dependency in the configured cache directory.
-   Any fetch failure aborts before the filesystem is changed.
+2. Clone or update repository dependencies in the configured cache directory.
+   Read live `path` dependencies directly, or cache a Git snapshot when a `ref`
+   is specified. Any dependency resolution failure aborts before installed
+   content is changed.
 3. Discover skills under `skills/<name>/SKILL.md` and agents under `agents/`,
    and apply each dependency's selections.
 4. Build the plan: when two dependencies provide the same skill or agent name,
@@ -63,15 +65,16 @@ Managed content is installed flat, not under a private nested directory. On
 subsequent runs, `agents-config` updates or removes only lock-owned paths.
 An existing path that is not lock-owned is left untouched and reported.
 
-A lock-owned path absent from the current plan is removed: this happens when
-a dependency or selection is removed, when a later dependency takes over a
-name, or when a target is disabled or its paths change. A lock-owned copy
+A lock-owned path no longer desired is removed: this happens when a
+dependency or selection is removed without another source taking its place,
+or when a target is disabled or its paths change. A later dependency taking
+over the same installed name updates that destination instead. A lock-owned copy
 modified on disk since installation is left in place with a warning instead
 of being removed.
 
 With `install_method: copy`, desired managed files are restored when missing
-or locally modified. With `install_method: link`, targets are symlinked to the
-cached checkout.
+or locally modified. With `install_method: link`, individual items are symlinked
+to their source (the cached checkout or snapshot, or a live path dependency).
 
 ## Architecture
 
@@ -174,23 +177,36 @@ Built-in handlers and their default `paths`:
 | `opencode-interop` | `.opencode/skills` | `.opencode/agents` |
 | `codex-interop` | `.codex/skills` | `.codex/agents` |
 
-Agents are copied unchanged; OpenCode's agent format differs from Claude
-Code's. Codex agents are TOML files, so the `codex` handlers don't install
+Agents are installed without format conversion, by copy or symlink according
+to the install method; OpenCode's agent format differs from Claude Code's.
+Codex agents are TOML files, so the `codex` handlers don't install
 agents at all (each run warns how many were skipped) until conversion
 exists.
 
-The `*-interop` handlers are for a harness used alongside `interop`, which
-must come earlier in the targets so that `.agents/` is filled first. For each
-kind, if the harness reads `.agents/` natively (OpenCode and Codex skills),
-items already there are left to it. If it doesn't, the `unsupported` setting
-decides: `symlink` (default) links every entry in `.agents/`, installed or
-hand-written, into the harness's directory; `install` installs the requested
-items exactly as the plain handler would (following `install_method`).
+The `*-interop` handlers are for a harness used alongside `interop`. Put
+`interop` earlier in the targets so that its installed entries are available
+when the variants inspect `.agents/skills` and `.agents/agents`. For each
+kind, if the harness reads it natively (OpenCode and Codex skills), items
+already there are left to it. If it doesn't, the `unsupported` setting
+decides: `symlink` (default) creates a separate link for each entry in that
+kind's directory, installed or hand-written; `install` installs the requested
+items individually as the plain handler would (following `install_method`).
 Requested items missing from `.agents/` are installed as the plain handler
 would. Each `*-interop` handler extends its plain handler, so it takes the
 same settings (e.g. `paths`), and a module that overrides the plain handler
 changes both. `codex-interop` defaults to, and only allows, `install`.
 `interop_paths` changes where `.agents/` is looked up.
+
+Ownership is tracked per installed item, not for the whole `skills` or
+`agents` directory. For example, `.claude/skills/gr-readme` links to
+`../../.agents/skills/gr-readme`; `.claude/skills` itself is not a symlink.
+Unmanaged items can coexist in these directories and are left untouched.
+
+For skill-only dependencies already installed by `interop`, neither
+`opencode-interop` nor `codex-interop` needs to create its own skills directory:
+both harnesses read `.agents/skills` directly. Empty destination directories
+are not created. OpenCode needs `.opencode/agents` only when installing or
+mirroring agents; Codex agents are currently skipped as noted above.
 
 Links to something inside the project, like these, are relative, so they
 keep working when the project is moved or cloned. Links into the dependency

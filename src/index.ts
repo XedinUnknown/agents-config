@@ -63,8 +63,9 @@ directory's agents.yaml. Both files share one schema
 later layers win.
 
 manage_gitignore is a top-level boolean (default false); the project value
-overrides the machine value. When false, built-in handlers leave existing
-.gitignore blocks untouched, so they may become stale until re-enabled. You may
+overrides the machine value. When true, built-in handlers maintain per-target
+.gitignore blocks for lock-owned installs, not foreign items. When false, they
+leave existing blocks untouched, so they may become stale until re-enabled. You may
 clean them up manually; a handler switch may require management enabled to
 finish the old handler's cleanup.
 

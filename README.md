@@ -84,9 +84,16 @@ Run `agents-config update` to refresh dependencies or after editing dependency
 declarations. If your coding tool doesn't discover the skill in an
 already-running session, start a new session.
 
-Commit `agents.yaml` and `agents-lock.json`. Ignore the generated install
-directories, such as `.agents/skills/` and `.claude/skills/`, in `.gitignore`.
-Keep your own skill sources outside those directories, for example in
+Commit `agents.yaml` and `agents-lock.json`. To keep installed items out of Git,
+either manage ignore rules yourself or opt in to per-item rules by adding
+`manage_gitignore: true` at the top level of `agents.yaml` or your machine
+`config.yaml`. This is off by default. When enabled, built-in handlers maintain
+a `.gitignore` in each destination for their installed items, leaving other
+items visible. Track those ignore files if the rules should be shared. Rules for
+an entire parent directory take precedence, and already tracked files remain
+tracked. See [Git ignore management](./docs/configuration.md#git-ignore-management).
+
+Keep your own skill sources outside the install directories, for example in
 [`skills/` with a `path: .` dependency](./docs/configuration.md#local-dependencies).
 
 ## Everyday Usage

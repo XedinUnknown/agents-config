@@ -39,6 +39,8 @@ export interface FileInstall {
   method: "copy" | "link";
   /** sha256 of the installed copy; empty for links, which always reflect the live source. */
   contentHash: string;
+  /** Set for an unmanaged interop entry the target's `link` setting asks for, rather than a dependency install. */
+  declared?: true;
   installedAt: string;
   updatedAt: string;
 }
@@ -171,8 +173,12 @@ export interface SyncResult {
   warnings: string[];
 }
 
-/** An item to place; `method` overrides the run's install method for this item. */
-export type FileItem = DesiredItem;
+/**
+ * An item to place; `method` overrides the run's install method for this
+ * item, and `declared` marks it as an entry a target's settings ask for
+ * rather than one a dependency provides.
+ */
+export type FileItem = DesiredItem & { declared?: boolean };
 
 export interface FileItems {
   skills: readonly FileItem[];
@@ -349,6 +355,7 @@ export async function syncFiles(
         name: item.name,
         method: "link",
         contentHash: "",
+        ...(item.declared ? { declared: true as const } : {}),
         installedAt: prior?.installedAt ?? now,
         updatedAt: outcome === "unchanged" && prior ? prior.updatedAt : now,
       };
@@ -374,6 +381,7 @@ export async function syncFiles(
       name: item.name,
       method: "copy",
       contentHash,
+      ...(item.declared ? { declared: true as const } : {}),
       installedAt: prior?.installedAt ?? now,
       updatedAt: now,
     };
@@ -520,6 +528,45 @@ async function interopEntries(dir: string, kind: ItemKind): Promise<Map<string, 
   return entries;
 }
 
+/** Names or globs (`*`, `?`) of unmanaged interop entries to expose, per kind. */
+type LinkPatterns = Record<ItemKind, string[]>;
+
+function resolveLink(
+  target: { name: string; options: Readonly<Record<string, unknown>> },
+  native: InteropSupport,
+  symlinkAllowed: boolean
+): LinkPatterns {
+  const raw = target.options["link"];
+  const link: LinkPatterns = { skills: [], agents: [] };
+  if (raw === undefined || raw === null) return link;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`Target '${target.name}': link must be a map of skills/agents name lists.`);
+  }
+  for (const [kind, value] of Object.entries(raw)) {
+    if (!(ITEM_KINDS as readonly string[]).includes(kind)) {
+      throw new Error(`Target '${target.name}': link.${kind} isn't a kind; use skills or agents.`);
+    }
+    if (value === undefined || value === null) continue;
+    if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || name === "")) {
+      throw new Error(`Target '${target.name}': link.${kind} must be a list of names or globs.`);
+    }
+    if (value.length === 0) continue;
+    if (!symlinkAllowed) {
+      throw new Error(`Target '${target.name}': link isn't supported by this harness.`);
+    }
+    if (native[kind as ItemKind]) {
+      throw new Error(`Target '${target.name}': link.${kind} isn't needed; this harness reads interop ${kind} natively.`);
+    }
+    link[kind as ItemKind] = value as string[];
+  }
+  return link;
+}
+
+function globMatcher(pattern: string): RegExp {
+  const source = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${source}$`);
+}
+
 function resolveUnsupported(target: { name: string; options: Readonly<Record<string, unknown>> }, fallback: Unsupported, symlinkAllowed: boolean): Unsupported {
   const value = target.options["unsupported"] ?? fallback;
   if (value !== "symlink" && value !== "install") {
@@ -545,12 +592,18 @@ function resolveUnsupported(target: { name: string; options: Readonly<Record<str
  *    `unsupported: install` installs the requested items exactly as the base
  *    handler would;
  *  - interop entries that weren't requested (hand-written, or written by
- *    another tool) are never linked or recorded: their owner exposes them;
+ *    another tool) are left to their owner, unless the target's `link`
+ *    setting names them: then they're handled like requested items of that
+ *    kind (linked, or installed per `install_method`) and recorded as
+ *    `declared`. A pattern matching no entry is a warning, since another
+ *    tool may not have generated it yet;
  *  - requested items missing from the interop location are installed as the
  *    base handler would.
  *
  * Settings: the base handler's (e.g. `paths`), plus `interop_paths` (where to
- * look; default `.agents/skills`/`.agents/agents`) and `unsupported`.
+ * look; default `.agents/skills`/`.agents/agents`), `unsupported` and `link`
+ * (names or globs per kind; only for kinds the harness doesn't read natively,
+ * and not where symlinking is impossible).
  */
 export function interopVariant(
   base: HarnessHandler,
@@ -563,11 +616,14 @@ export function interopVariant(
       base.validate?.(target);
       resolveInteropPaths(target.name, target.options);
       resolveUnsupported(target, unsupportedDefault, symlinkAllowed);
+      resolveLink(target, native, symlinkAllowed);
     },
     async sync(ctx): Promise<SyncReport> {
       const interopPaths = resolveInteropPaths(ctx.targetName, ctx.options);
       const unsupported = resolveUnsupported({ name: ctx.targetName, options: ctx.options }, unsupportedDefault, symlinkAllowed);
+      const link = resolveLink({ name: ctx.targetName, options: ctx.options }, native, symlinkAllowed);
       const items: { skills: FileItem[]; agents: FileItem[] } = { skills: [], agents: [] };
+      const warnings: string[] = [];
 
       for (const kind of ITEM_KINDS) {
         // A target being cleaned up mirrors nothing, so all its links go.
@@ -578,14 +634,35 @@ export function interopVariant(
 
         // Only requested items are handled: entries another tool put in the
         // interop location are neither linked nor recorded as installs.
+        const requested = new Set<string>();
         for (const item of ctx.plan[kind]) {
-          const entry = entries.get(installedName(item, await isFile(item.sourcePath)));
+          const fileName = installedName(item, await isFile(item.sourcePath));
+          requested.add(fileName);
+          const entry = entries.get(fileName);
           if (entry === undefined || (!native[kind] && !mirror)) items[kind].push(item);
           else if (mirror) items[kind].push(entry);
         }
+
+        // Unmanaged entries the target's `link` setting names.
+        const declared = new Set<string>();
+        for (const pattern of link[kind]) {
+          const matcher = globMatcher(pattern);
+          let matched = false;
+          for (const [fileName, entry] of entries) {
+            if (!matcher.test(entry.name)) continue;
+            matched = true;
+            if (requested.has(fileName) || declared.has(fileName)) continue;
+            declared.add(fileName);
+            // Linked when mirroring, otherwise installed per the run's install method.
+            const { method: _linked, ...installed } = entry;
+            items[kind].push(mirror ? { ...entry, declared: true } : { ...installed, declared: true });
+          }
+          if (!matched) warnings.push(`link.${kind}: '${pattern}' matches nothing in ${interopPaths[kind]}`);
+        }
       }
 
-      return base.installItems(ctx, items);
+      const report = await base.installItems(ctx, items);
+      return { ...report, warnings: [...report.warnings, ...warnings] };
     },
   };
 }

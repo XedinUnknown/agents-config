@@ -131,10 +131,13 @@ that is absent or `null` means "use the handler's default", so `null` in
   and a module overriding the plain handler changes the variant too. They
   make a harness see what an
   earlier target put in `.agents/`: kinds the harness reads natively there
-  are left alone; for the others, `unsupported: symlink` mirrors every
-  `.agents/` entry (installed or hand-written, read from disk at run time —
-  hence the ordering) as links, `unsupported: install` installs the requested
-  items. Requested items missing from `.agents/` are installed normally.
+  are left alone; for the others, `unsupported: symlink` links each
+  requested item's `.agents/` entry (read from disk at run time — hence the
+  ordering), `unsupported: install` installs the requested items. Requested
+  items missing from `.agents/` are installed normally. Entries that weren't
+  requested (hand-written, or written by another tool such as OpenSpec) are
+  never linked or recorded, so the lock describes only what `agents.yaml`
+  declares and no path is claimed by two tools.
   Codex agents must be TOML, so `codex-interop` only allows `install`, and
   the `codex` handler itself skips agents (one warning per run; earlier
   copies are pruned) via `flatDirectoryHandler`'s `unsupported` kinds.

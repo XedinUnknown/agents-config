@@ -601,6 +601,69 @@ describe("interop harness handlers", () => {
       });
     });
   }
+  test("a *-interop target's link setting exposes the unmanaged entries it names, recorded as declared", async () => {
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      for (const name of ["openspec-propose", "openspec-apply", "other-tool"]) {
+        await mkdir(join(project, ".agents", "skills", name), { recursive: true });
+        await writeFile(join(project, ".agents", "skills", name, "SKILL.md"), name);
+      }
+      const options = { link: { skills: ["openspec-*", "share?", "missing-*"], agents: ["own"] } };
+      const state: FilesState = {};
+      const report = await handler("claude-interop").sync(ctx(project, plan, state, options));
+
+      const propose = join(".claude", "skills", "openspec-propose");
+      assert.equal(await readlink(join(project, propose)), join("..", "..", ".agents", "skills", "openspec-propose"));
+      assert.equal(state.installs?.[propose]?.declared, true);
+      assert.equal(state.installs?.[join(".claude", "skills", "openspec-apply")]?.declared, true);
+      assert.equal(state.installs?.[join(".claude", "agents", "own.md")]?.declared, true);
+      assert.equal(await pathExists(join(project, ".claude", "skills", "other-tool")), false);
+      // A requested item a pattern also matches stays a dependency install.
+      assert.equal(state.installs?.[join(".claude", "skills", "shared")]?.declared, undefined);
+      assert.equal(report.added.filter((path) => path === join(".claude", "skills", "shared")).length, 1);
+      assert.match(await readFile(join(project, ".claude", "skills", ".gitignore"), "utf8"), /^\/openspec-propose$/m);
+      assert.deepEqual(report.warnings, ["link.skills: 'missing-*' matches nothing in .agents/skills"]);
+
+      // Dropping the setting removes what it declared.
+      const second = await handler("claude-interop").sync(ctx(project, plan, state));
+      assert.deepEqual(second.removed.sort(), [
+        join(".claude", "agents", "own.md"),
+        join(".claude", "skills", "openspec-apply"),
+        propose,
+      ]);
+      assert.equal(await pathExists(join(project, ".agents", "skills", "openspec-propose", "SKILL.md")), true);
+    });
+  });
+
+  test("with unsupported: install, declared entries are installed per install_method", async () => {
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      await mkdir(join(project, ".agents", "skills", "openspec-propose"), { recursive: true });
+      await writeFile(join(project, ".agents", "skills", "openspec-propose", "SKILL.md"), "foreign");
+      const state: FilesState = {};
+      await handler("claude-interop").sync(ctx(project, plan, state, { unsupported: "install", link: { skills: ["openspec-*"] } }));
+
+      const path = join(".claude", "skills", "openspec-propose");
+      assert.equal((await lstat(join(project, path))).isSymbolicLink(), false);
+      assert.equal(state.installs?.[path]?.method, "copy");
+      assert.equal(state.installs?.[path]?.declared, true);
+    });
+  });
+
+  test("the link setting is validated, and refused where it can't apply", () => {
+    const claude = handler("claude-interop");
+    const target = (name: string, link: unknown) => ({ name: "t", handler: name, options: { link } });
+    assert.doesNotThrow(() => claude.validate?.(target("claude-interop", { skills: ["a-*"], agents: [] })));
+    assert.doesNotThrow(() => claude.validate?.(target("claude-interop", null)));
+    assert.throws(() => claude.validate?.(target("claude-interop", ["a"])), /link must be a map/);
+    assert.throws(() => claude.validate?.(target("claude-interop", { skills: "a" })), /link.skills must be a list/);
+    assert.throws(() => claude.validate?.(target("claude-interop", { skills: [""] })), /link.skills must be a list/);
+    assert.throws(() => claude.validate?.(target("claude-interop", { commands: ["a"] })), /link.commands isn't a kind/);
+    const opencode = handler("opencode-interop");
+    assert.throws(() => opencode.validate?.(target("opencode-interop", { skills: ["a"] })), /reads interop skills natively/);
+    assert.doesNotThrow(() => opencode.validate?.(target("opencode-interop", { agents: ["a"] })));
+    assert.throws(() => handler("codex-interop").validate?.(target("codex-interop", { agents: ["a"] })), /link isn't supported/);
+  });
 
   test("codex-interop installs agents by default and refuses unsupported: symlink", async () => {
     const codex = handler("codex-interop");

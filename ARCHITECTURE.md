@@ -119,8 +119,9 @@ installed without conversion.
 The `*-interop` handlers resolve and extend the corresponding plain handler
 rather than duplicating it. They inspect shared directories at run time, so
 `interop` must run before them to expose its installs. Native kinds, such as
-OpenCode and Codex skills, need no mirror. Other kinds are mirrored per item
-or installed normally according to configuration. See
+OpenCode and Codex skills, need no mirror. For other kinds, requested items
+are mirrored per item or installed normally according to configuration;
+unrequested entries in shared directories are never mirrored. See
 [targets and interop](./docs/configuration.md#targets-and-interop).
 
 Links inside the project are relative so the project can be moved. Links to

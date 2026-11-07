@@ -588,6 +588,20 @@ describe("interop harness handlers", () => {
     });
   });
 
+  for (const [name, options] of [["claude-interop", { unsupported: "install" }], ["codex-interop", {}]] as const) {
+    test(`${name} ${JSON.stringify(options)} neither installs nor records interop entries another tool wrote`, async () => {
+      await withTmpDir(async (project) => {
+        const plan = await fixture(project);
+        await mkdir(join(project, ".agents", "skills", "openspec-propose"), { recursive: true });
+        await writeFile(join(project, ".agents", "skills", "openspec-propose", "SKILL.md"), "foreign");
+        const state: FilesState = {};
+        const report = await handler(name).sync(ctx(project, plan, state, options));
+        assert.ok(!report.added.some((path) => path.includes("openspec")));
+        assert.ok(!Object.keys(state.installs ?? {}).some((path) => path.includes("openspec")));
+      });
+    });
+  }
+
   test("codex-interop installs agents by default and refuses unsupported: symlink", async () => {
     const codex = handler("codex-interop");
     assert.throws(() => codex.validate?.({ name: "c", handler: "codex-interop", options: { unsupported: "symlink" } }), /isn't possible/);

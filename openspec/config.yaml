@@ -4,9 +4,7 @@ context: |
   openspec/specs/ describes implemented behavior; README.md, docs/configuration.md,
   and ARCHITECTURE.md are the user and maintainer documentation. A change that
   alters behavior updates both, following CONTRIBUTING.md's documentation rules.
-  Linux/WSL is the only supported platform; do not add macOS or Windows path handling.
   Installation must never silently overwrite or remove content agents-config does not own.
-  The agents.yaml dependency shape must stay compatible with agentdeps' manifest.
   Verify installation changes with isolated project, config, and cache directories.
 
 # Project context (optional)

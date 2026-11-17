@@ -30,8 +30,15 @@ agents-lock.json              <- pins dependency sources
 
 ## Why agents-config?
 
+- **Declare the result, not the steps.** Installers such as Vercel's
+  [`skills`](https://github.com/vercel-labs/skills) CLI change a project one
+  `add` or `remove` at a time. Here `agents.yaml` is the source of truth:
+  delete an entry, run `install`, and what it installed is gone.
 - **One manifest, multiple coding tools.** Share skills through `.agents/`
   and let target handlers bridge the directories each tool expects.
+- **Machine defaults, project overrides.** A machine `config.yaml` and the
+  project's `agents.yaml` share one schema and merge, so each project
+  declares only what differs.
 - **Keep hand-written content safe.** Built-in handlers leave existing,
   unmanaged files alone and report conflicts instead of overwriting them.
 - **Sync instead of cleaning up by hand.** Re-running installs repairs desired
@@ -42,6 +49,11 @@ agents-lock.json              <- pins dependency sources
   at all. See [the recipe](#claude-code-doesnt-see-skills-another-tool-wrote-to-agentsskills).
 - **Use Git sources or your own files.** Select individual skills and agents,
   pin a Git revision, or link a live local dependency.
+
+Need one of the dozens of coding tools agents-config has no handler for yet,
+or a skill directory to browse? Vercel's `skills` covers far more tools.
+Adding a tool here means writing a target handler; see
+[Architecture](./ARCHITECTURE.md).
 
 ## Quick Start
 

@@ -38,8 +38,16 @@ typecheck: $(NODE_MODULES) ## Typecheck sources and tests
 test: $(NODE_MODULES) ## Run the tests
 	npm test
 
+.PHONY: specs
+specs: $(NODE_MODULES) ## Validate OpenSpec specs and changes
+	npx openspec validate --all --strict --no-interactive
+
+.PHONY: openspec
+openspec: $(NODE_MODULES) ## Generate the OpenSpec agent skills in .agents/skills
+	npx openspec init --tools agents --no-animation .
+
 .PHONY: check
-check: typecheck test ## Typecheck and test
+check: typecheck test specs ## Typecheck, test, and validate specs
 
 .PHONY: pack
 pack: $(PACKAGE) ## Build the npm package tarball

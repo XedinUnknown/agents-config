@@ -59,8 +59,8 @@ Adding a tool here means writing a target handler; see
 ## Quick Start
 
 Requires **Node.js 22+** and **npm**. **Git** is only required for Git repository
-dependencies; local path-only installs do not require Git. Linux/WSL is the
-currently supported platform.
+dependencies; local path-only installs do not require Git. Tested on Linux and WSL;
+macOS is untested.
 
 ### 1. Install the CLI
 

@@ -32,7 +32,8 @@ agents-lock.json              <- pins dependency sources
 
 - **Declare the result, not the steps.** Installers such as Vercel's
   [`skills`](https://github.com/vercel-labs/skills) CLI change a project one
-  `add` or `remove` at a time. Here `agents.yaml` is the source of truth:
+  `add` or `remove` at a time (its declarative sync is experimental and tied
+  to `package.json`). Here `agents.yaml` is the source of truth:
   delete an entry, run `install`, and what it installed is gone.
 - **One manifest, multiple coding tools.** Share skills through `.agents/`
   and let target handlers bridge the directories each tool expects.

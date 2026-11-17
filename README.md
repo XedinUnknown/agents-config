@@ -5,7 +5,7 @@
 Declare skills and subagents in `agents.yaml`. Install them where your coding
 tools can find them, without maintaining separate copies by hand.
 
-[Quick Start](#quick-start) · [Configuration](./docs/configuration.md) ·
+[Quick Start](#quick-start) · [Recipes](#recipes) · [Configuration](./docs/configuration.md) ·
 [Commands](#commands) · [Architecture](./ARCHITECTURE.md) ·
 [Contributing](./CONTRIBUTING.md)
 
@@ -36,6 +36,9 @@ agents-lock.json              <- tracks sources and installed paths
 - **Sync instead of cleaning up by hand.** Re-running installs repairs desired
   managed copies and prunes stale installs; modified stale copies are preserved
   with a warning.
+- **Expose what other tools generate.** Link skills that tools such as
+  OpenSpec write to `.agents/skills` into Claude Code, with no dependencies
+  at all. See [the recipe](#claude-code-doesnt-see-skills-another-tool-wrote-to-agentsskills).
 - **Use Git sources or your own files.** Select individual skills and agents,
   pin a Git revision, or link a live local dependency.
 
@@ -95,6 +98,83 @@ tracked. See [Git ignore management](./docs/configuration.md#git-ignore-manageme
 
 Keep your own skill sources outside the install directories, for example in
 [`skills/` with a `path: .` dependency](./docs/configuration.md#local-dependencies).
+
+## Recipes
+
+Find your problem, copy the snippet into `agents.yaml`, run `agents-config install`.
+
+### Claude Code doesn't see skills another tool wrote to `.agents/skills`
+
+Tools such as OpenSpec (`openspec init --tools agents`) write skills only to
+`.agents/skills`, which OpenCode and Codex read but Claude Code does not. Link
+them into `.claude/skills` without installing anything:
+
+```yaml
+targets:
+  claude-interop:
+    link:
+      skills: [openspec-*]
+```
+
+```text
+.claude/skills/openspec-propose -> ../../.agents/skills/openspec-propose
+```
+
+No dependencies or `interop` target are needed. The links are recorded in the
+lock and pruned when a name leaves `link`; the shared entries themselves are
+never touched. A pattern that matches nothing yet warns instead of failing, so
+the manifest can be committed before the other tool runs. See
+[`link`](./docs/configuration.md#targets-and-interop).
+
+### Your own skills should be edited in place, not copied
+
+Keep sources in the project's `skills/<name>/SKILL.md` and `agents/`, and
+depend on the project itself. Path dependencies are linked and read live:
+
+```yaml
+dependencies:
+  - path: .
+```
+
+See [local dependencies](./docs/configuration.md#local-dependencies).
+
+### A dependency's default branch keeps changing under you
+
+Set `ref` to a release branch, tag, or commit instead of the default `main`.
+`install` always reuses the commit recorded in `agents-lock.json`; only `update`
+moves it:
+
+```yaml
+dependencies:
+  - repo: Dhii/containers
+    ref: 0.3.x
+    skills: [config-based-modularity]
+    agents: false
+```
+
+### Installed skills show up in `git status`
+
+Add `manage_gitignore: true` to `agents.yaml` or `config.yaml`. Each
+destination gets a `.gitignore` block listing only the items the tool manages;
+hand-written skills next to them stay visible. See
+[Git ignore management](./docs/configuration.md#git-ignore-management).
+
+### Skills should land in a non-standard directory
+
+Reuse a built-in handler under a new target name with its own `paths`, for
+example to install flat into a personal configuration repository:
+
+```yaml
+targets:
+  interop: false
+  agents-root:
+    handler: interop
+    paths:
+      skills: skills
+      agents: agents
+```
+
+See [custom destinations](./docs/configuration.md#custom-destinations).
 
 ## Everyday Usage
 

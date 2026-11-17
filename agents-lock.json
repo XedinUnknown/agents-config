@@ -1,14 +1,50 @@
 {
   "version": 3,
   "skills": {
+    "agents-config": {
+      "path": "."
+    },
     "gr-readme": {
       "repo": "Gingiris-1031/gingiris-skills",
-      "ref": "b86ee95484f7bb25d333b6424417f970b70f3bce"
+      "ref": "b86ee95484f7bb25d333b6424417f970b70f3bce",
+      "commit": "b86ee95484f7bb25d333b6424417f970b70f3bce"
     },
     "github-presence": {
       "repo": "jonathimer/devmarketing-skills",
-      "ref": "main"
+      "ref": "main",
+      "commit": "500b44b53220292879223a807ce0d349aafe2537"
     }
   },
-  "agents": {}
+  "agents": {},
+  "dependencies": [
+    {
+      "dependency": {
+        "path": ".",
+        "skills": "*",
+        "agents": "*"
+      }
+    },
+    {
+      "dependency": {
+        "repo": "Gingiris-1031/gingiris-skills",
+        "ref": "b86ee95484f7bb25d333b6424417f970b70f3bce",
+        "skills": [
+          "gr-readme"
+        ],
+        "agents": false
+      },
+      "commit": "b86ee95484f7bb25d333b6424417f970b70f3bce"
+    },
+    {
+      "dependency": {
+        "repo": "jonathimer/devmarketing-skills",
+        "ref": "main",
+        "skills": [
+          "github-presence"
+        ],
+        "agents": false
+      },
+      "commit": "500b44b53220292879223a807ce0d349aafe2537"
+    }
+  ]
 }

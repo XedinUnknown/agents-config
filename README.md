@@ -5,7 +5,7 @@
 Declare skills and subagents in `agents.yaml`. Install them where your coding
 tools can find them, without maintaining separate copies by hand.
 
-[Quick Start](#quick-start) · [Recipes](#recipes) · [Configuration](./docs/configuration.md) ·
+[Quick Start](#quick-start) · [Recipes](#recipes) · [Agent Skill](#agent-skill) · [Configuration](./docs/configuration.md) ·
 [Commands](#commands) · [Architecture](./ARCHITECTURE.md) ·
 [Contributing](./CONTRIBUTING.md)
 
@@ -190,6 +190,21 @@ targets:
 ```
 
 See [custom destinations](./docs/configuration.md#custom-destinations).
+
+## Agent Skill
+
+The [`agents-config` skill](./skills/agents-config/SKILL.md) teaches a coding
+agent to use this tool for you: write `agents.yaml`, pick targets for the tools
+you use, run `install` or `update`, explain warnings, and say what to commit.
+Install it like any other skill:
+
+```yaml
+dependencies:
+  - repo: XedinUnknown/agents-config
+    ref: 0.1.x
+    skills: [agents-config]
+    agents: false
+```
 
 ## Everyday Usage
 

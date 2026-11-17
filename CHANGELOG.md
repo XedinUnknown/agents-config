@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `agents-config` agent skill in `skills/agents-config/`, teaching coding
+  agents to write `agents.yaml`, pick targets, run installs, explain their
+  output, and know what to commit. This repository installs it via `path: .`.
+
 ## [0.1.0-beta.3] - 2026-11-17
 
 ### Changed

@@ -13,7 +13,7 @@
  * (built-in settings don't exist in config: a setting that is absent or null
  * means "use the handler's own default"), plus the requested skills and
  * agents, and installs them however its harness needs. It records what it
- * did in its target's section of agents-lock.json, so a later run — or a
+ * did in its target's record in the install state, so a later run — or a
  * cleanup after the target is disabled, renamed, or removed from config —
  * can update or undo exactly that.
  *
@@ -54,7 +54,7 @@ export interface HandlerContext {
   readonly installMethod: "link" | "copy";
   readonly manageGitignore: boolean;
   /**
-   * This target's record in agents-lock.json, owned and shaped by the
+   * This target's record in the install state, owned and shaped by the
    * handler. Mutate it in place as work is done: it is saved even if sync
    * throws partway, so whatever was already done stays recorded. Leave it
    * empty when nothing remains installed.

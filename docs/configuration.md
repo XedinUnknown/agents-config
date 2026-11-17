@@ -61,6 +61,9 @@ dependencies:
 - `manage_gitignore` is `false` by default. Set it to `true` to have built-in
   handlers maintain managed ignore blocks. As a scalar, a project value in
   `agents.yaml` overrides the machine value in `config.yaml`.
+- `state_dir` is where this machine's install state lives, relative to the
+  project; `.agents/agents-config` by default. See
+  [Sync and Lockfile Behavior](#sync-and-lockfile-behavior).
 - `targets` merge by name. `true` enables a target, `false` disables an
   inherited one, and a map adds or overrides settings by key.
 - Changing a target's explicit `handler` starts its settings fresh. Absent or
@@ -139,7 +142,7 @@ must either remove `ref` to become live or switch to a repository URI.
 
 When `manage_gitignore: true`, built-in handlers maintain a marked block per
 target in each destination directory's `.gitignore`, listing that target's
-lock-owned installed names as literal, directory-relative patterns. Copies and links are covered, including
+owned installed names as literal, directory-relative patterns. Copies and links are covered, including
 modified stale items retained during cleanup. Foreign items are not added.
 Blocks are updated or removed as ownership changes; text outside the target's
 block and blocks for other targets are preserved. Recognized markers with
@@ -266,9 +269,29 @@ target paths: built-in handlers treat another target's installed items as foreig
 
 ## Sync and Lockfile Behavior
 
-`agents-lock.json` records winning sources and per-target installation state.
-Built-in handlers update or remove only lock-owned paths. Existing unmanaged
-paths are left alone and conflicts are reported.
+`agents-lock.json` records dependency resolutions and the winning source for
+each skill and agent name. It depends only on the merged dependency
+declarations, not on which targets run, so it is the same on every machine.
+
+What each target installed is install state, kept in `state.json` under
+`state_dir` (`.agents/agents-config` by default). Targets come partly from the
+machine `config.yaml`, so this state differs between machines. The directory
+holds a `.gitignore` of `*`, so it stays out of Git without further setup, and
+is removed once no target has anything installed. Built-in handlers update or
+remove only the paths their state records. Existing unmanaged paths are left
+alone and conflicts are reported.
+
+Set `state_dir` in `agents.yaml` when the default does not suit the project,
+such as a project that is itself an `.agents` directory:
+
+```yaml
+state_dir: agents-config
+```
+
+Changing `state_dir` does not move existing state. Until the directory is moved
+to the new location, previously installed items are treated as unmanaged: they
+are not updated or pruned. A warning is shown when state exists at the default
+location but another is configured.
 
 `install` uses locked dependency declarations and commits. With no lockfile,
 it resolves the merged dependencies and creates one. `update` resolves the
@@ -281,7 +304,9 @@ settings and the run's install method can change without updating dependencies.
 Live `path` dependencies remain live and reject `ref`; use a `file://` repository
 dependency for a versioned local source.
 Older locks without dependency resolutions require one `update`, preserving
-their existing ownership records. `add` and `remove` run a full update after
+their existing ownership records. Locks that still hold install state under
+`targets` have it moved into the state file on the next run, unless this
+machine already has one. `add` and `remove` run a full update after
 editing the manifest, so they may also advance other dependencies.
 
 Desired managed copies are restored when missing or modified. Stale installs

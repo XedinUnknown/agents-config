@@ -278,19 +278,18 @@ test("syncFiles (copy): re-running with unchanged content is a no-op", async () 
   });
 });
 
-test("syncFiles (copy): changed content updates in place and preserves installedAt", async () => {
+test("syncFiles (copy): changed content updates in place", async () => {
   await withTmpDir(async (project) => {
     const src = await makeSourceSkill(project, "foo", "v1");
     const lock: FilesState = {};
     await syncFiles(project, interop, skillPlan(skill("foo", src)), "copy", lock);
-    const installedAt = lock.installs?.[FOO]?.installedAt;
 
     await writeFile(join(src, "SKILL.md"), "v2");
     const result = await syncFiles(project, interop, skillPlan(skill("foo", src)), "copy", lock);
 
     assert.deepEqual(result.updated, [FOO]);
     assert.equal(await readFile(join(project, FOO, "SKILL.md"), "utf-8"), "v2");
-    assert.equal(lock.installs?.[FOO]?.installedAt, installedAt);
+    assert.equal(lock.installs?.[FOO]?.contentHash, await hashPath(src));
   });
 });
 
@@ -578,7 +577,7 @@ describe("interop harness handlers", () => {
       await mkdir(join(project, ".claude", "skills"), { recursive: true });
       await symlink(join("..", "..", ".agents", "skills", "openspec-propose"), join(project, foreign));
       const old: FilesState = {
-        installs: { [foreign]: { kind: "skills", name: "openspec-propose", method: "link", contentHash: "", installedAt: "t", updatedAt: "t" } },
+        installs: { [foreign]: { kind: "skills", name: "openspec-propose", method: "link", contentHash: "" } },
       };
       const report = await handler("claude-interop").sync(ctx(project, plan, old));
       assert.deepEqual(report.removed, [foreign]);
@@ -694,7 +693,7 @@ describe("interop harness handlers", () => {
       await mkdir(join(project, ".codex", "agents"), { recursive: true });
       await writeFile(join(project, old), "# a");
       const state = {
-        installs: { [old]: { kind: "agents", name: "shared-agent", method: "copy", contentHash: await hashPath(join(project, old)), installedAt: "t", updatedAt: "t" } },
+        installs: { [old]: { kind: "agents", name: "shared-agent", method: "copy", contentHash: await hashPath(join(project, old)) } },
       };
 
       const report = await handler("codex").sync(ctx(project, plan, state));

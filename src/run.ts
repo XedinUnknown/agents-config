@@ -1,7 +1,8 @@
 /**
  * Install orchestration: config.yaml + agents.yaml layers -> merged settings
  * -> resolved deps -> last-wins plan -> each target's handler installs it,
- * tracked by the project's agents-lock.json.
+ * resolutions pinned by the project's agents-lock.json, and what each target
+ * installed on this machine tracked in its install state (state.ts).
  *
  * Every dependency is fetched and every configuration error raised (unknown
  * handler, settings a handler rejects, a lock record whose handler is no
@@ -14,7 +15,8 @@ import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn, type SnapshotRepoFn 
 import { dependencyLabel, isPathDependency, mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
 import type { DiscoveredItem } from "./discovery.ts";
 import { buildPlan, type Origin, type Plan, type ResolvedDep } from "./plan.ts";
-import type { LockFile } from "./lockfile.ts";
+import type { LoadedLock, LockFile } from "./lockfile.ts";
+import { DEFAULT_STATE_DIR, statePath, type InstallState } from "./state.ts";
 import { ITEM_KINDS, handlerKey, type SyncReport, type Target, type TargetHandler } from "./registry.ts";
 import type { Container, Provider } from "./di/index.ts";
 
@@ -33,8 +35,10 @@ export interface RunServices {
   filterItems: FilterItemsFn;
   manifestExists: (path: string) => Promise<boolean>;
   loadManifest: (path: string) => Promise<Layer>;
-  loadLock: (projectDir: string) => Promise<LockFile>;
+  loadLock: (projectDir: string) => Promise<LoadedLock>;
   saveLock: (projectDir: string, lock: LockFile) => Promise<void>;
+  loadState: (projectDir: string, stateDir: string) => Promise<InstallState | undefined>;
+  saveState: (projectDir: string, stateDir: string, state: InstallState) => Promise<void>;
   getHandler: (name: string) => TargetHandler | undefined;
 }
 
@@ -137,10 +141,10 @@ const NOTHING: Plan = { skills: [], agents: [], replacements: [] };
 /**
  * Resolve every handler this run needs, before anything is fetched or changed:
  * one install run per enabled target, plus a cleanup run for every target the
- * lock records that is now disabled, gone from config, or using a different
+ * install state records that is now disabled, gone from config, or using a different
  * handler — handled by the handler that installed it.
  */
-function planRuns(targets: readonly Target[], lock: LockFile, services: RunServices) {
+function planRuns(targets: readonly Target[], state: InstallState, statePath: string, services: RunServices) {
   const installs: TargetRun[] = [];
   for (const target of targets) {
     const handler = services.getHandler(target.handler);
@@ -156,19 +160,45 @@ function planRuns(targets: readonly Target[], lock: LockFile, services: RunServi
   }
 
   const cleanups: TargetRun[] = [];
-  for (const [name, record] of Object.entries(lock.targets)) {
+  for (const [name, record] of Object.entries(state.targets)) {
     if (installs.some((run) => run.name === name && run.handlerName === record.handler)) continue;
     const handler = services.getHandler(record.handler);
     if (!handler) {
       throw new Error(
         `Target '${name}' was installed by the '${record.handler}' handler, which is no longer available` +
-          " — it is needed to undo that install (see agents-lock.json)."
+          ` — it is needed to undo that install (see ${statePath}).`
       );
     }
     cleanups.push({ name, handlerName: record.handler, handler, options: {} });
   }
 
   return { installs, cleanups };
+}
+
+/**
+ * This machine's install state. A version 2 lock's `targets` seed it when no
+ * state file exists yet; an existing state file wins, since a committed lock
+ * may carry another machine's state.
+ */
+async function loadInstallState(
+  cwd: string,
+  stateDir: string,
+  legacyTargets: InstallState["targets"] | undefined,
+  services: RunServices
+): Promise<InstallState> {
+  const state = await services.loadState(cwd, stateDir);
+  if (state) return state;
+  if (legacyTargets !== undefined) {
+    console.log(`  moving install state from agents-lock.json to ${statePath(cwd, stateDir)}`);
+    return { version: 1, targets: legacyTargets };
+  }
+  if (stateDir !== DEFAULT_STATE_DIR && (await services.loadState(cwd, DEFAULT_STATE_DIR))) {
+    console.warn(
+      `  ⚠ install state exists at ${statePath(cwd, DEFAULT_STATE_DIR)}, but state_dir is ${stateDir}; ` +
+        "items installed before are treated as foreign until that state is moved there."
+    );
+  }
+  return { version: 1, targets: {} };
 }
 
 /**
@@ -192,8 +222,9 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
         "    interop: true"
     );
   }
-  const lock = await services.loadLock(cwd);
-  const runs = planRuns(settings.targets, lock, services);
+  const { lock, legacyTargets } = await services.loadLock(cwd);
+  const state = await loadInstallState(cwd, settings.state_dir, legacyTargets, services);
+  const runs = planRuns(settings.targets, state, statePath(cwd, settings.state_dir), services);
   const lockExists = await services.manifestExists(join(cwd, "agents-lock.json"));
   if (!update && lockExists) {
     if (lock.dependencies === undefined) {
@@ -226,13 +257,15 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   for (const kind of ITEM_KINDS) {
     lock[kind] = Object.fromEntries(plan[kind].map((item) => [item.name, item.origin]));
   }
-  // Resolution is durable even if a later handler fails; target ownership is
-  // saved again below as handlers make progress.
+  // Resolution is durable even if a later handler fails; install state is
+  // saved below as handlers make progress.
   await services.saveLock(cwd, lock);
+  // A version 2 lock's install state now lives in the state file.
+  if (legacyTargets !== undefined) await services.saveState(cwd, settings.state_dir, state);
 
   const sync = async (run: TargetRun, enabled: boolean): Promise<SyncReport> => {
-    const record = lock.targets[run.name] ?? { handler: run.handlerName, state: {} };
-    lock.targets[run.name] = record;
+    const record = state.targets[run.name] ?? { handler: run.handlerName, state: {} };
+    state.targets[run.name] = record;
     try {
       const report = await run.handler.sync({
         projectDir: cwd,
@@ -247,12 +280,12 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
       reportSync(run.name, report);
       return report;
     } finally {
-      if (Object.keys(record.state).length === 0) delete lock.targets[run.name];
+      if (Object.keys(record.state).length === 0) delete state.targets[run.name];
     }
   };
 
   const cleanupSync = async (run: TargetRun): Promise<SyncReport> => {
-    const record = lock.targets[run.name]!;
+    const record = state.targets[run.name]!;
     const report = await run.handler.sync({
       projectDir: cwd,
       targetName: run.name,
@@ -270,9 +303,9 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
   try {
     for (const run of runs.cleanups) {
       const report = await cleanupSync(run);
-      const left = lock.targets[run.name];
-      if (left && !report.cleanupBlocked && Object.keys(left.state).length === 0) delete lock.targets[run.name];
-      const remaining = lock.targets[run.name];
+      const left = state.targets[run.name];
+      if (left && !report.cleanupBlocked && Object.keys(left.state).length === 0) delete state.targets[run.name];
+      const remaining = state.targets[run.name];
       if (remaining && runs.installs.some((i) => i.name === run.name)) {
         if (report.cleanupBlocked) {
           throw new Error(`Target '${run.name}' cannot switch handlers: ${report.cleanupBlocked}`);
@@ -284,7 +317,7 @@ export async function runInstall(machine: Layer, cwd: string, services: RunServi
       await sync(run, true);
     }
   } finally {
-    await services.saveLock(cwd, lock);
+    await services.saveState(cwd, settings.state_dir, state);
   }
 
   console.log("\nInstall complete");
@@ -323,6 +356,8 @@ export function runProvider(): Provider {
           loadManifest: c.resolve("manifest/load"),
           loadLock: c.resolve("lockfile/load"),
           saveLock: c.resolve("lockfile/save"),
+          loadState: c.resolve("state/load"),
+          saveState: c.resolve("state/save"),
           getHandler: (name) => (c.has(handlerKey(name)) ? c.resolve<TargetHandler>(handlerKey(name)) : undefined),
         };
 

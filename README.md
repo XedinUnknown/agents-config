@@ -24,7 +24,8 @@ agents-config install
 
 .agents/skills/skill-creator/   <- shared skill, read by OpenCode and Codex
 .claude/skills/skill-creator   -> ../../.agents/skills/skill-creator
-agents-lock.json              <- tracks sources and installed paths
+agents-lock.json              <- pins dependency sources
+.agents/agents-config/        <- this machine's install state, ignored by Git
 ```
 
 ## Why agents-config?
@@ -84,7 +85,8 @@ Run `agents-config update` to refresh dependencies or after editing dependency
 declarations. If your coding tool doesn't discover the skill in an
 already-running session, start a new session.
 
-Commit `agents.yaml` and `agents-lock.json`. To keep installed items out of Git,
+Commit `agents.yaml` and `agents-lock.json`. Install state in
+`.agents/agents-config/` ignores itself. To keep installed items out of Git,
 either manage ignore rules yourself or opt in to per-item rules by adding
 `manage_gitignore: true` at the top level of `agents.yaml` or your machine
 `config.yaml`. This is off by default. When enabled, built-in handlers maintain

@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { bootstrapApp } from "./app.ts";
 import type { LockFile } from "./lockfile.ts";
+import type { InstallState } from "./state.ts";
 
 const exec = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -66,6 +67,12 @@ async function fixture(t: TestContext, method: "copy" | "link" = "copy") {
 
 async function lockAt(project: string): Promise<LockFile> {
   return JSON.parse(await readFile(join(project, "agents-lock.json"), "utf8"));
+}
+
+const stateFile = join(".agents", "agents-config", "state.json");
+
+async function stateAt(project: string): Promise<InstallState> {
+  return JSON.parse(await readFile(join(project, stateFile), "utf8"));
 }
 
 async function installed(project: string) {
@@ -183,27 +190,33 @@ test("dependency drift rejects install without changing the lock or installed co
   assert.deepEqual(await unchangedState(project), before);
 });
 
-test("legacy locks require update, which upgrades resolutions without losing ownership", async (t) => {
+test("legacy locks require update, which upgrades resolutions and moves install state without losing ownership", async (t) => {
   const f = await fixture(t);
   const project = await f.project();
   await f.run(project, "install");
-  const legacy = await lockAt(project);
-  delete legacy.dependencies;
-  legacy.skills.demo = { repo: f.repo, ref: "main" };
+  const { dependencies: _, ...current } = await lockAt(project);
+  const state = await stateAt(project);
+  // A version 2 lock: no pinned resolutions, install state under `targets`.
+  const legacy = { ...current, version: 2, skills: { demo: { repo: f.repo, ref: "main" } }, targets: state.targets };
   await writeFile(join(project, "agents-lock.json"), JSON.stringify(legacy, null, 2) + "\n");
+  await rm(join(project, stateFile), { force: true });
   const before = await unchangedState(project);
   const next = await f.commit("# new");
 
   await assert.rejects(f.run(project, "install"), /no pinned dependency resolutions.*agents-config update/);
   assert.deepEqual(await unchangedState(project), before);
+  await assert.rejects(stat(join(project, stateFile)), { code: "ENOENT" });
   await f.run(project, "update");
   const upgraded = await lockAt(project);
+  assert.equal(upgraded.version, 3);
+  assert.equal("targets" in upgraded, false);
   assert.equal(upgraded.dependencies?.[0]?.commit, next);
   assert.equal(await installed(project), "# new");
-  assert.equal(upgraded.targets.interop?.handler, legacy.targets.interop?.handler);
-  assert.deepEqual(Object.keys(upgraded.targets.interop!.state), Object.keys(legacy.targets.interop!.state));
+  const moved = await stateAt(project);
+  assert.equal(moved.targets.interop?.handler, state.targets.interop?.handler);
+  assert.deepEqual(Object.keys(moved.targets.interop!.state), Object.keys(state.targets.interop!.state));
 
-  // Pruning the upgraded install proves its concrete path is still lock-owned.
+  // Pruning the upgraded install proves its concrete path is still owned.
   await writeFile(join(project, "agents.yaml"), "dependencies: []\n");
   await f.run(project, "update");
   await assert.rejects(stat(join(project, skill)), { code: "ENOENT" });

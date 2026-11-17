@@ -4,6 +4,7 @@
  *
  *   clone_method: https | ssh
  *   install_method: copy | link
+ *   state_dir: .agents/agents-config   # this machine's install state, relative to the project
  *   targets:
  *     claude: true                 # enable a built-in (or inherited) target
  *     interop: false               # disable an inherited target
@@ -41,6 +42,7 @@
 import { normalize } from "node:path";
 import { parse } from "yaml";
 import type { Target } from "./registry.ts";
+import { DEFAULT_STATE_DIR } from "./state.ts";
 
 export type Selection = "*" | string[] | false;
 
@@ -79,6 +81,7 @@ export interface Layer {
   clone_method?: "ssh" | "https";
   install_method?: "link" | "copy";
   manage_gitignore?: boolean;
+  state_dir?: string;
   targets?: Record<string, boolean | TargetOverride>;
   dependencies?: Dependency[];
 }
@@ -87,6 +90,8 @@ export interface Settings {
   clone_method: "ssh" | "https";
   install_method: "link" | "copy";
   manage_gitignore: boolean;
+  /** Where this machine's install state lives, relative to the project. */
+  state_dir: string;
   /** Whether any layer has a `targets` key; install refuses to guess when none does. */
   targetsDeclared: boolean;
   /** Enabled targets, in the order they first appear across layers — the order they run in. */
@@ -245,6 +250,14 @@ export function parseLayer(content: string, source: string): Layer {
     layer.manage_gitignore = manageGitignore;
   }
 
+  const stateDir = raw["state_dir"];
+  if (stateDir !== undefined) {
+    if (typeof stateDir !== "string" || normalize(stateDir).replace(/\/+$/, "") === ".") {
+      throw new Error(`${source}: invalid state_dir "${String(stateDir)}". Must be a directory other than the project itself.`);
+    }
+    layer.state_dir = stateDir;
+  }
+
   if (raw["targets"] !== undefined) {
     layer.targets = parseTargets(raw["targets"], source);
   }
@@ -287,6 +300,7 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
   let cloneMethod: Settings["clone_method"] = "https";
   let installMethod: Settings["install_method"] = "copy";
   let manageGitignore = false;
+  let stateDir = DEFAULT_STATE_DIR;
   let targetsDeclared = false;
   const dependencies = new Map<string, Dependency>();
 
@@ -294,6 +308,7 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
     if (layer.clone_method !== undefined) cloneMethod = layer.clone_method;
     if (layer.install_method !== undefined) installMethod = layer.install_method;
     if (layer.manage_gitignore !== undefined) manageGitignore = layer.manage_gitignore;
+    if (layer.state_dir !== undefined) stateDir = layer.state_dir;
 
     if (layer.targets !== undefined) {
       targetsDeclared = true;
@@ -324,6 +339,7 @@ export function mergeLayers(layers: readonly Layer[]): Settings {
     clone_method: cloneMethod,
     install_method: installMethod,
     manage_gitignore: manageGitignore,
+    state_dir: stateDir,
     targetsDeclared,
     targets: [...targets]
       .filter(([, state]) => state.enabled)

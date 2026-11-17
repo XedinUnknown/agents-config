@@ -632,6 +632,14 @@ describe("interop harness handlers", () => {
         propose,
       ]);
       assert.equal(await pathExists(join(project, ".agents", "skills", "openspec-propose", "SKILL.md")), true);
+
+      // Cleaning up a target that still has the setting removes its declared links without warnings.
+      await handler("claude-interop").sync(ctx(project, plan, state, options));
+      const empty = { skills: [], agents: [], replacements: [] };
+      const cleanup = await handler("claude-interop").sync(ctx(project, empty, state, options, false));
+      assert.deepEqual(cleanup.warnings, []);
+      assert.deepEqual(state, {});
+      assert.equal(await pathExists(join(project, propose)), false);
     });
   });
 

@@ -621,7 +621,10 @@ export function interopVariant(
     async sync(ctx): Promise<SyncReport> {
       const interopPaths = resolveInteropPaths(ctx.targetName, ctx.options);
       const unsupported = resolveUnsupported({ name: ctx.targetName, options: ctx.options }, unsupportedDefault, symlinkAllowed);
-      const link = resolveLink({ name: ctx.targetName, options: ctx.options }, native, symlinkAllowed);
+      // A target being cleaned up exposes nothing, so its patterns aren't evaluated.
+      const link = ctx.enabled
+        ? resolveLink({ name: ctx.targetName, options: ctx.options }, native, symlinkAllowed)
+        : { skills: [], agents: [] };
       const items: { skills: FileItem[]; agents: FileItem[] } = { skills: [], agents: [] };
       const warnings: string[] = [];
 

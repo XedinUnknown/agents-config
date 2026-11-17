@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `agents-config` agent skill in `skills/agents-config/`, teaching coding
+  agents to write `agents.yaml`, pick targets, run installs, explain their
+  output, and know what to commit. This repository installs it via `path: .`.
 - Per-dependency `paths: { skills, agents }` for sources that keep skills or
   agents outside `skills/` and `agents/`, such as `skills: .` for skills at the
   repository root. The paths are recorded with the dependency in

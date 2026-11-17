@@ -4,7 +4,8 @@
 
 ## Development Setup
 
-Requires Node.js 22+, npm, Git, and Make on Linux/WSL.
+Requires Node.js 22+, npm, Git, and Make. Tested on Linux and WSL; macOS is
+untested.
 The main development branch is `0.1.x`; `master` is the stable branch by
 repository convention, not the current development baseline.
 

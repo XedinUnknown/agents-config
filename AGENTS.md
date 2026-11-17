@@ -210,8 +210,7 @@ its own project, with a target whose relative paths match — see
 for `~/.agents`. The dual-template system was pure redundant complexity,
 not a real capability; see Progress for how this came about.
 
-**Config resolution**: the `dependencies` shape stays compatible with
-`agentdeps`' `agents.yaml`. Tool config directory prefers
+**Config resolution**: tool config directory prefers
 `$XDG_CONFIG_HOME/agents-config`, falling back to `$XDG_CONFIG_HOME/agentdeps`
 (the original tool's real directory) when the new one has no `config.yaml`.
 `config.yaml` is optional (a missing file is an empty layer). `agentdeps`'
@@ -236,10 +235,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md#specifications).
 - Never silently overwrite content the lockfile doesn't own, and never silently
   let two dependencies clobber each other under the same installed name — both
   must surface as visible warnings.
-- Manifest (`agents.yaml`) schema must stay a strict superset of `agentdeps`'
-  shape — no migration required for existing files.
-- Linux/WSL only for now: no macOS/Windows path branching (agentdeps had it;
-  deliberately dropped as unneeded complexity for this machine).
+- Tested on Linux and WSL; macOS is untested.
 - Codex finds skills in `.agents/skills` and `.codex/skills`, recursively
   (verified, see Purpose). Whether it loads project agents from `.codex/agents`
   is still unconfirmed, and they must be TOML, so the `codex` handlers skip

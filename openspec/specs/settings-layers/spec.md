@@ -16,13 +16,6 @@ The machine `config.yaml` and project `agents.yaml` SHALL share one schema with 
 - **WHEN** a layer sets `state_dir: .`
 - **THEN** loading fails, because the state directory must differ from the project directory
 
-### Requirement: Legacy agentdeps keys are rejected
-A layer containing the `agents` or `custom_agents` key SHALL be rejected with a hint to use `targets`, rather than being translated or ignored.
-
-#### Scenario: Legacy custom harness configuration
-- **WHEN** `config.yaml` contains `custom_agents`
-- **THEN** loading fails with a message showing an equivalent `targets` example
-
 ### Requirement: Layer merge order and precedence
 Layers SHALL merge in the order `config.yaml`, then `agents.yaml`. Scalars MUST be replaced by later layers; defaults are `clone_method: https`, `install_method: copy`, `manage_gitignore: false`, and `state_dir: .agents/agents-config`.
 
@@ -60,12 +53,8 @@ Dependencies SHALL be keyed by normalized repository (case-insensitive, without 
 - **THEN** the merged list keeps two dependencies, with the project's entry first
 
 ### Requirement: Machine configuration location
-The machine configuration directory SHALL be the `--config` override when given; otherwise `$XDG_CONFIG_HOME/agents-config` (default `~/.config/agents-config`), falling back to `$XDG_CONFIG_HOME/agentdeps` only when the former has no `config.yaml` and the latter does. A missing `config.yaml` MUST be treated as an empty layer.
-
-#### Scenario: Only the legacy directory has a configuration
-- **WHEN** `~/.config/agents-config/config.yaml` is absent and `~/.config/agentdeps/config.yaml` exists
-- **THEN** the legacy file is loaded as the machine layer
+The machine configuration directory SHALL be the `--config` override when given; otherwise `$XDG_CONFIG_HOME/agents-config` (default `~/.config/agents-config`). A missing `config.yaml` MUST be treated as an empty layer.
 
 #### Scenario: No machine configuration
-- **WHEN** no `config.yaml` exists in either directory
+- **WHEN** the configuration directory has no `config.yaml`
 - **THEN** the machine layer is empty and the run continues with project settings

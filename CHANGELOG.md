@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] YYYY-MM-DD
+## [Unreleased]
+
+## [0.1.0-beta.2] - 2026-11-17
 
 ### Added
 
@@ -18,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Disabling it leaves existing blocks untouched, so they may become stale until
   re-enabled; users may remove stale blocks manually. Handler switches may
   require management enabled to complete old-handler cleanup.
-
 - `link` setting for `*-interop` targets exposes selected unmanaged entries
   in `.agents/` (names or globs per kind), linked or installed per
   `unsupported`, recorded as `declared` and covered by the managed
@@ -99,4 +100,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agentdeps`' `agents` and `custom_agents` configuration keys. They are
   rejected with a hint to use `targets`.
 
-[unreleased]: https://github.com/XedinUnknown/agents-config/commits/0.1.x
+[unreleased]: https://github.com/XedinUnknown/agents-config/compare/v0.1.0-beta.2...0.1.x
+[0.1.0-beta.2]: https://github.com/XedinUnknown/agents-config/compare/v0.1.0-beta.1...v0.1.0-beta.2
+[0.1.0-beta.1]: https://github.com/XedinUnknown/agents-config/releases/tag/v0.1.0-beta.1

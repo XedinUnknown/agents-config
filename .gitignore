@@ -9,3 +9,7 @@ dist/
 /.claude/skills/
 /.opencode/skills/
 /.codex/skills/
+
+# Per-user Claude Code state.
+/.claude/settings.local.json
+/.claude/worktrees/

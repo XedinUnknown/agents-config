@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-11-17
+
+### Changed
+
+- README: problem-oriented recipes, including exposing skills that other
+  tools write to `.agents/skills` in Claude Code with only a `link` setting.
+
 ### Changed
 
 - Install state moved out of `agents-lock.json` into `state.json` under the
@@ -112,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agentdeps`' `agents` and `custom_agents` configuration keys. They are
   rejected with a hint to use `targets`.
 
-[unreleased]: https://github.com/XedinUnknown/agents-config/compare/v0.1.0-beta.2...0.1.x
+[unreleased]: https://github.com/XedinUnknown/agents-config/compare/v0.1.0-beta.3...0.1.x
+[0.1.0-beta.3]: https://github.com/XedinUnknown/agents-config/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/XedinUnknown/agents-config/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/XedinUnknown/agents-config/releases/tag/v0.1.0-beta.1

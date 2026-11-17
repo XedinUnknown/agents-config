@@ -11,16 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- README: problem-oriented recipes, including exposing skills that other
-  tools write to `.agents/skills` in Claude Code with only a `link` setting.
-
-### Changed
-
 - Install state moved out of `agents-lock.json` into `state.json` under the
   new `state_dir` setting (default `.agents/agents-config`), which ignores
   itself in Git. The lock (version 3) now holds only dependency resolutions
   and winning sources, so it no longer changes with each machine's targets.
   A version 2 lock's install state is moved on the next run.
+- README: problem-oriented recipes, including exposing skills that other
+  tools write to `.agents/skills` in Claude Code with only a `link` setting.
 
 ### Removed
 

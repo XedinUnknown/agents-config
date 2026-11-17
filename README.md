@@ -123,7 +123,7 @@ targets:
 ```
 
 No dependencies or `interop` target are needed. The links are recorded in the
-lock and pruned when a name leaves `link`; the shared entries themselves are
+install state and pruned when a name leaves `link`; the shared entries themselves are
 never touched. A pattern that matches nothing yet warns instead of failing, so
 the manifest can be committed before the other tool runs. See
 [`link`](./docs/configuration.md#targets-and-interop).

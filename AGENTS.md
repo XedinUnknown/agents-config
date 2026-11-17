@@ -220,6 +220,13 @@ not a real capability; see Progress for how this came about.
 back to `interop`), so a legacy config read through the fallback must be
 migrated first.
 
+## Specifications
+
+`openspec/specs/` is the specification of implemented behavior. Before changing
+behavior, read the affected capability specs; propose the change through
+OpenSpec (`openspec/changes/`) so its spec deltas are reviewed with the code.
+See [CONTRIBUTING.md](./CONTRIBUTING.md#specifications).
+
 ## Constraints
 
 - Built-in target names match each tool's actual CLI binary name (`claude`,

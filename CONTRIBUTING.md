@@ -21,10 +21,15 @@ declared coding-agent skills as well, run `npm run agents-config -- install`
 after configuring targets as described in the
 [configuration guide](./docs/configuration.md#machine-defaults).
 
+Run `make openspec` before that install to generate the
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) workflow skills in
+`.agents/skills`; `agents.yaml` links them into `.claude/skills`.
+
 ## Checks and Builds
 
 ```bash
-make check      # typecheck and test
+make check      # typecheck, test, and validate specs
+make specs      # validate OpenSpec specs and changes
 make dev        # re-run the tests on every change
 make build      # compile to dist/, as published
 make pack       # build the npm package tarball
@@ -48,6 +53,14 @@ Check the initial install, an unchanged second run, selection removal and
 pruning, and protection of unmanaged content. For copy installs, check repair of
 desired modified or missing content and preservation of stale modified content.
 Use local Git fixtures when network access is unnecessary.
+
+## Specifications
+
+`openspec/specs/` holds the specification of implemented behavior, one
+capability per directory. Propose behavior changes as OpenSpec changes in
+`openspec/changes/`, with their spec deltas; archiving a completed change
+merges its deltas into `openspec/specs/`. Project context and rules for
+generated artifacts are in `openspec/config.yaml`.
 
 ## Documentation Changes
 

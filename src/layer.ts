@@ -16,6 +16,7 @@
  *       ref: main
  *       skills: "*" | [names] | true | false
  *       agents: "*" | [names] | true | false
+ *       paths: { skills: ., agents: agents }   # optional; where they live in the repo
  *     - path: .                    # a live folder with skills/ + agents/, relative to the project
  *       install_method: copy       # optional per-dependency override
  *
@@ -39,16 +40,27 @@
  * hint rather than ignored, so a legacy config can never silently fall back
  * to the default target.
  */
-import { normalize } from "node:path";
+import { isAbsolute, normalize } from "node:path";
 import { parse } from "yaml";
 import type { Target } from "./registry.ts";
 import { DEFAULT_STATE_DIR } from "./state.ts";
 
 export type Selection = "*" | string[] | false;
 
+/** Where a dependency keeps its skills and agents, relative to its root. */
+export interface SourcePaths {
+  skills?: string;
+  agents?: string;
+}
+
+/** Folders a dependency's skills and agents are read from when `paths` doesn't say. */
+export const DEFAULT_SOURCE_PATHS: Readonly<Required<SourcePaths>> = { skills: "skills", agents: "agents" };
+
 interface DependencyBase {
   skills: Selection;
   agents: Selection;
+  /** Where skills and agents live in the dependency; absent keys use DEFAULT_SOURCE_PATHS. */
+  paths?: SourcePaths;
   /** Overrides the run's install method for this dependency's items. */
   install_method?: "link" | "copy";
 }
@@ -60,7 +72,7 @@ export interface RepoDependency extends DependencyBase {
 }
 
 /**
- * A folder with the standard `skills/` + `agents/` layout, relative to the
+ * A folder with skills and agents (in `skills/` + `agents/` unless `paths` says otherwise), relative to the
  * project directory (or absolute), read live from disk and linked by default.
  */
 export interface PathDependency extends DependencyBase {
@@ -135,6 +147,28 @@ function normalizeSelection(raw: unknown, field: string, source: string): Select
   throw new Error(`${source}: '${field}' must be "*", true, false, or a list of names.`);
 }
 
+function normalizeSourcePaths(raw: unknown, where: string): SourcePaths | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(`${where}: 'paths' must be a map of skills/agents directories.`);
+  }
+  const paths: SourcePaths = {};
+  for (const [kind, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (kind !== "skills" && kind !== "agents") {
+      throw new Error(`${where}: unknown key 'paths.${kind}'; expected 'skills' or 'agents'.`);
+    }
+    if (typeof value !== "string" || value === "") {
+      throw new Error(`${where}: 'paths.${kind}' must be a non-empty string.`);
+    }
+    const normalized = normalize(value).replace(/\/+$/, "") || ".";
+    if (isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../")) {
+      throw new Error(`${where}: 'paths.${kind}' must be a folder inside the dependency, relative to its root.`);
+    }
+    paths[kind] = normalized;
+  }
+  return paths;
+}
+
 function normalizeDependency(raw: unknown, index: number, source: string): Dependency {
   const dep = (raw ?? {}) as Record<string, unknown>;
   const where = `${source}: dependency at index ${index}`;
@@ -156,9 +190,11 @@ function normalizeDependency(raw: unknown, index: number, source: string): Depen
   if (installMethod !== undefined && installMethod !== "link" && installMethod !== "copy") {
     throw new Error(`${where}: install_method must be "link" or "copy"`);
   }
+  const paths = normalizeSourcePaths(dep["paths"], where);
   const base: DependencyBase = {
     skills: normalizeSelection(dep["skills"], "skills", source),
     agents: normalizeSelection(dep["agents"], "agents", source),
+    ...(paths !== undefined ? { paths } : {}),
     ...(installMethod !== undefined ? { install_method: installMethod } : {}),
   };
 

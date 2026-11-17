@@ -44,6 +44,7 @@ test("saveManifestDependencies round-trips through loadManifest and omits defaul
     const dependencies: Dependency[] = [
       { repo: "owner/repo-a", ref: "main", skills: "*", agents: "*" },
       { repo: "owner/repo-b", ref: "v2", skills: ["x"], agents: false },
+      { repo: "owner/repo-c", ref: "main", skills: ["y"], agents: false, paths: { skills: "." } },
       { path: ".", skills: "*", agents: "*" },
       { path: "../lib", skills: ["demo"], agents: false, install_method: "copy" },
     ];

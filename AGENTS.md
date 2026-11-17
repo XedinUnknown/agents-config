@@ -93,6 +93,15 @@ folders. When enabled, built-in handlers maintain per-target ignore blocks for
 owned installs, including when authored and installed items share a directory,
 as in `~/.agents`.
 
+**Source layout: explicit `paths`, no fallback (`src/layer.ts`,
+`src/discovery.ts`)**: a dependency reads `skills/` and `agents/` unless its
+`paths` names other folders inside it. There is deliberately no fallback such as
+scanning the root when `skills/` is absent: what a dependency exposes would
+change silently whenever its upstream added or removed `skills/`. `paths` is
+stored only when declared, so locks written before it existed still match.
+`paths.agents: .` is allowed but warned about in the docs, since every root
+`.md` (README, LICENSE) would then count as an agent.
+
 **Collision rule: last wins (`src/plan.ts`)**: when two dependencies provide
 the same skill or agent name, the later one in merged order replaces the
 earlier in the plan; only the winner is installed, once, and the replacement

@@ -514,25 +514,29 @@ describe("interop harness handlers", () => {
     state: state as Record<string, unknown>,
   });
 
-  test("opencode-interop leaves natively read skills to .agents, installs the rest, and links agents (hand-written too)", async () => {
+  test("opencode-interop leaves natively read skills to .agents, installs the rest, and links requested agents only", async () => {
     await withTmpDir(async (project) => {
       const plan = await fixture(project);
       const state = {};
       const report = await handler("opencode-interop").sync(ctx(project, plan, state));
 
       assert.deepEqual(report.added.sort(), [
-        join(".opencode", "agents", "own.md"),
         join(".opencode", "agents", "shared-agent.md"),
         join(".opencode", "skills", "only-here"),
       ]);
       assert.equal(await pathExists(join(project, ".opencode", "skills", "shared")), false);
-      assert.equal(await readlink(join(project, ".opencode", "agents", "own.md")), join("..", "..", ".agents", "agents", "own.md"));
+      assert.equal(await pathExists(join(project, ".opencode", "agents", "own.md")), false, "hand-written entries aren't linked");
+      assert.equal(
+        await readlink(join(project, ".opencode", "agents", "shared-agent.md")),
+        join("..", "..", ".agents", "agents", "shared-agent.md")
+      );
       assert.equal((await lstat(join(project, ".opencode", "skills", "only-here"))).isSymbolicLink(), false);
 
-      // An interop entry that disappears takes its link with it.
-      await rm(join(project, ".agents", "agents", "own.md"));
+      // A requested agent that leaves the interop location is installed as the plain handler would.
+      await rm(join(project, ".agents", "agents", "shared-agent.md"));
       const second = await handler("opencode-interop").sync(ctx(project, plan, state));
-      assert.deepEqual(second.removed, [join(".opencode", "agents", "own.md")]);
+      assert.deepEqual(second.updated, [join(".opencode", "agents", "shared-agent.md")]);
+      assert.equal((await lstat(join(project, ".opencode", "agents", "shared-agent.md"))).isSymbolicLink(), false);
 
       // Cleanup removes everything it placed.
       await handler("opencode-interop").sync(ctx(project, { skills: [], agents: [], replacements: [] }, state, {}, false));
@@ -540,13 +544,14 @@ describe("interop harness handlers", () => {
     });
   });
 
-  test("claude-interop links every interop entry; with unsupported: install it copies the requested items instead", async () => {
+  test("claude-interop links requested interop entries; with unsupported: install it copies them instead", async () => {
     await withTmpDir(async (project) => {
       const plan = await fixture(project);
       const linked = await handler("claude-interop").sync(ctx(project, plan, {}));
       assert.ok(linked.added.includes(join(".claude", "skills", "shared")));
       assert.equal((await lstat(join(project, ".claude", "skills", "shared"))).isSymbolicLink(), true);
-      assert.ok(linked.added.includes(join(".claude", "agents", "own.md")));
+      assert.ok(linked.added.includes(join(".claude", "agents", "shared-agent.md")));
+      assert.ok(!linked.added.includes(join(".claude", "agents", "own.md")), "hand-written entries aren't linked");
 
       await rm(join(project, ".claude"), { recursive: true });
       const copied = await handler("claude-interop").sync(ctx(project, plan, {}, { unsupported: "install" }));
@@ -554,6 +559,48 @@ describe("interop harness handlers", () => {
       assert.ok(!copied.added.includes(join(".claude", "agents", "own.md")), "hand-written entries aren't copied");
     });
   });
+
+  test("claude-interop neither links nor records interop entries another tool wrote, and drops ones an earlier version tracked", async () => {
+    await withTmpDir(async (project) => {
+      const plan = await fixture(project);
+      await mkdir(join(project, ".agents", "skills", "openspec-propose"), { recursive: true });
+      await writeFile(join(project, ".agents", "skills", "openspec-propose", "SKILL.md"), "foreign");
+
+      const fresh: FilesState = {};
+      await handler("claude-interop").sync(ctx(project, plan, fresh));
+      const foreign = join(".claude", "skills", "openspec-propose");
+      assert.equal(await pathExists(join(project, foreign)), false);
+      assert.ok(!(foreign in (fresh.installs ?? {})));
+      assert.doesNotMatch(await readFile(join(project, ".claude", "skills", ".gitignore"), "utf8"), /openspec/);
+
+      // A lock written by an earlier version still owns the foreign link: it's pruned.
+      await rm(join(project, ".claude"), { recursive: true });
+      await mkdir(join(project, ".claude", "skills"), { recursive: true });
+      await symlink(join("..", "..", ".agents", "skills", "openspec-propose"), join(project, foreign));
+      const old: FilesState = {
+        installs: { [foreign]: { kind: "skills", name: "openspec-propose", method: "link", contentHash: "", installedAt: "t", updatedAt: "t" } },
+      };
+      const report = await handler("claude-interop").sync(ctx(project, plan, old));
+      assert.deepEqual(report.removed, [foreign]);
+      assert.equal(await pathExists(join(project, foreign)), false);
+      assert.equal(await pathExists(join(project, ".agents", "skills", "openspec-propose", "SKILL.md")), true, "the source is untouched");
+      assert.ok(!(foreign in (old.installs ?? {})));
+    });
+  });
+
+  for (const [name, options] of [["claude-interop", { unsupported: "install" }], ["codex-interop", {}]] as const) {
+    test(`${name} ${JSON.stringify(options)} neither installs nor records interop entries another tool wrote`, async () => {
+      await withTmpDir(async (project) => {
+        const plan = await fixture(project);
+        await mkdir(join(project, ".agents", "skills", "openspec-propose"), { recursive: true });
+        await writeFile(join(project, ".agents", "skills", "openspec-propose", "SKILL.md"), "foreign");
+        const state: FilesState = {};
+        const report = await handler(name).sync(ctx(project, plan, state, options));
+        assert.ok(!report.added.some((path) => path.includes("openspec")));
+        assert.ok(!Object.keys(state.installs ?? {}).some((path) => path.includes("openspec")));
+      });
+    });
+  }
 
   test("codex-interop installs agents by default and refuses unsupported: symlink", async () => {
     const codex = handler("codex-interop");
@@ -607,7 +654,7 @@ describe("interop harness handlers", () => {
       const plan = await fixture(project);
       const report = await c.resolve<TargetHandler>("handler/claude-interop").sync(ctx(project, plan, {}));
       assert.deepEqual(report.added, ["custom"]);
-      assert.deepEqual(calls, [["only-here", "shared"]]);
+      assert.deepEqual(calls, [["shared", "only-here"]]);
     });
 
     assert.throws(() => c.resolve("handler/codex-interop"), /'codex' handler can't be extended by 'codex-interop'/);

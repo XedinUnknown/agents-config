@@ -198,7 +198,10 @@ symlink for the entire skills directory. For example:
 
 For kinds a harness cannot read directly from the shared `.agents/skills` or
 `.agents/agents` directory, `unsupported: symlink` (default)
-mirrors every shared entry individually, installed or hand-written.
+links each requested item's shared entry individually. Entries in the shared
+directories that `agents.yaml` doesn't request, such as hand-written ones or
+those another tool generates, are not linked or recorded; the tool that owns
+them is responsible for exposing them to other harnesses.
 `unsupported: install` installs the requested items as the plain handler would,
 following `install_method`. Requested items absent from shared directories are
 also installed normally. `interop_paths` overrides where shared content is

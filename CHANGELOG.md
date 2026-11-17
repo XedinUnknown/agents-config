@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional copy override. They no longer accept `ref` or require Git. Use a
   `repo: file:///absolute/path/to/repository` dependency with `ref` for a
   versioned local repository.
+- `*-interop` handlers with `unsupported: symlink` link only requested items,
+  no longer every entry in `.agents/`. Hand-written entries and those written
+  by other tools are no longer linked or recorded in `agents-lock.json` or the
+  managed `.gitignore` block; links an earlier version recorded for them are
+  removed on the next install.
 - Installation output summarizes added, updated, and removed items by count per
   target instead of listing every skill and agent. Warnings remain detailed.
 

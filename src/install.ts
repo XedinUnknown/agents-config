@@ -540,11 +540,12 @@ function resolveUnsupported(target: { name: string; options: Readonly<Record<str
  *
  *  - if the harness reads the interop location natively, items already there
  *    are left to it;
- *  - if it doesn't, `unsupported: symlink` links every entry in the interop
- *    location — installed or hand-written — into the harness's own
- *    directory, so the harness sees exactly what interop has, while
+ *  - if it doesn't, `unsupported: symlink` links each requested item's
+ *    interop entry into the harness's own directory, while
  *    `unsupported: install` installs the requested items exactly as the base
  *    handler would;
+ *  - interop entries that weren't requested (hand-written, or written by
+ *    another tool) are never linked or recorded: their owner exposes them;
  *  - requested items missing from the interop location are installed as the
  *    base handler would.
  *
@@ -575,11 +576,13 @@ export function interopVariant(
           : new Map<string, FileItem>();
         const mirror = !native[kind] && unsupported === "symlink";
 
+        // Only requested items are handled: entries another tool put in the
+        // interop location are neither linked nor recorded as installs.
         for (const item of ctx.plan[kind]) {
-          const shared = entries.has(installedName(item, await isFile(item.sourcePath)));
-          if (!shared || (!native[kind] && !mirror)) items[kind].push(item);
+          const entry = entries.get(installedName(item, await isFile(item.sourcePath)));
+          if (entry === undefined || (!native[kind] && !mirror)) items[kind].push(item);
+          else if (mirror) items[kind].push(entry);
         }
-        if (mirror) items[kind].push(...entries.values());
       }
 
       return base.installItems(ctx, items);

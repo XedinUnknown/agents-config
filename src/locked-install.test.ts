@@ -115,6 +115,62 @@ test("install pins main; update advances the commit and an unchanged update does
   assert.deepEqual(await unchangedState(project), updated);
 });
 
+test("skills outside skills/ install through dependency paths, which the lock keeps across updates and removal", async (t) => {
+  const f = await fixture(t);
+  const topLevel = async (content: string) => {
+    await mkdir(join(f.source, "top"), { recursive: true });
+    await writeFile(join(f.source, "top", "SKILL.md"), content);
+    await f.git("add", ".");
+    await f.git("commit", "-m", content);
+    return f.git("rev-parse", "HEAD");
+  };
+  const first = await topLevel("# top old");
+  const yaml = `dependencies:\n  - repo: ${f.repo}\n    skills: [top]\n    agents: false\n    paths:\n      skills: .\n`;
+  const project = await f.project("project", yaml);
+  const top = join(project, ".agents", "skills", "top", "SKILL.md");
+
+  await f.run(project, "install");
+  assert.equal(await readFile(top, "utf8"), "# top old");
+  assert.deepEqual((await lockAt(project)).dependencies, [{
+    dependency: { repo: f.repo, ref: "main", skills: ["top"], agents: false, paths: { skills: "." } },
+    commit: first,
+  }]);
+
+  await topLevel("# top new");
+  await f.run(project, "install");
+  assert.equal(await readFile(top, "utf8"), "# top old");
+  await f.run(project, "update");
+  assert.equal(await readFile(top, "utf8"), "# top new");
+
+  await writeFile(join(project, "agents.yaml"), "dependencies: []\n");
+  await f.run(project, "update");
+  await assert.rejects(stat(top), { code: "ENOENT" });
+});
+
+test("a changed dependency path is drift that install rejects until update", async (t) => {
+  const f = await fixture(t);
+  const project = await f.project();
+  await f.run(project, "install");
+  await writeFile(join(project, "agents.yaml"), `${f.manifest}    paths: { skills: . }\n`);
+  await assert.rejects(f.run(project, "install"), /Dependencies differ from agents-lock\.json/);
+});
+
+test("discovery warnings name the folder that was searched", async (t) => {
+  const f = await fixture(t);
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  t.after(() => { console.warn = warn; });
+  const missing = await f.project("missing", `dependencies:\n  - repo: ${f.repo}\n    agents: false\n    paths: { skills: lib/skills }\n`);
+  await f.run(missing, "install");
+  const empty = await f.project("empty", `dependencies:\n  - repo: ${f.repo}\n    skills: [nope]\n    agents: false\n    paths: { skills: . }\n`);
+  await f.run(empty, "install");
+  console.warn = warn;
+  assert.ok(warnings.some((w) => w.includes(`no skills found in ${f.repo} (lib/skills/ does not exist)`)), warnings.join("\n"));
+  assert.ok(warnings.some((w) => w.includes(`no skills found in ${f.repo} (no SKILL.md in any subdirectory of ./)`)), warnings.join("\n"));
+  assert.ok(warnings.some((w) => w.includes(`skills not found in ${f.repo} under ./: nope`)), warnings.join("\n"));
+});
+
 test("a copied lock installs its old commit into a fresh project and cache after main moves", async (t) => {
   const f = await fixture(t);
   const original = await f.project();

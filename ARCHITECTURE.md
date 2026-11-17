@@ -31,7 +31,8 @@ installed from immutable commit snapshots; archive exclusions in
 cache snapshots. They reject `ref`; versioned local repositories use `repo`
 with a `file://` URI instead. Only repository fetches require Git to be installed.
 
-Discovery reads `skills/<name>/SKILL.md` and agents under `agents/`. Dependency
+Discovery reads `skills/<name>/SKILL.md` and agents under `agents/`, or the
+folders a dependency names in `paths`, which must resolve inside it. Dependency
 selections filter the results. When multiple dependencies provide the same
 name, the later dependency in merged order wins; the replacement is reported
 and only the winner is installed.

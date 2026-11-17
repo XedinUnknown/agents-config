@@ -12,7 +12,7 @@
 import { join, resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import { resolveRepoUrl, deriveCacheKey, type EnsureRepoFn, type SnapshotRepoFn } from "./cache.ts";
-import { dependencyLabel, isPathDependency, mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
+import { DEFAULT_SOURCE_PATHS, dependencyLabel, isPathDependency, mergeLayers, type Dependency, type Layer, type Selection } from "./layer.ts";
 import type { DiscoveredItem } from "./discovery.ts";
 import { buildPlan, type Origin, type Plan, type ResolvedDep } from "./plan.ts";
 import type { LoadedLock, LockFile } from "./lockfile.ts";
@@ -30,8 +30,8 @@ export interface RunServices {
   ensureRepo: EnsureRepoFn;
   snapshotRepo: SnapshotRepoFn;
   isDirectory: (path: string) => Promise<boolean>;
-  discoverSkills: (repoPath: string) => Promise<DiscoveredItem[]>;
-  discoverAgents: (repoPath: string) => Promise<DiscoveredItem[]>;
+  discoverSkills: (repoPath: string, dir?: string) => Promise<DiscoveredItem[]>;
+  discoverAgents: (repoPath: string, dir?: string) => Promise<DiscoveredItem[]>;
   filterItems: FilterItemsFn;
   manifestExists: (path: string) => Promise<boolean>;
   loadManifest: (path: string) => Promise<Layer>;
@@ -70,6 +70,11 @@ async function fetchDep(
   return { dir: folder, origin: { path: dep.path }, method: dep.install_method ?? "link" };
 }
 
+/** A dependency-relative folder as shown in warnings: `skills/`, or `./` for the root. */
+function displayDir(dir: string): string {
+  return dir === "." ? "./" : `${dir}/`;
+}
+
 async function resolveDeps(
   deps: readonly Dependency[],
   cwd: string,
@@ -83,25 +88,38 @@ async function resolveDeps(
     const label = dependencyLabel(dep);
     const { dir, origin, method } = await fetchDep(dep, cwd, cloneMethod, services, locked?.[index]?.commit);
 
-    const [discoveredSkills, discoveredAgents] = await Promise.all([
-      services.discoverSkills(dir),
-      services.discoverAgents(dir),
-    ]);
+    const paths = { ...DEFAULT_SOURCE_PATHS, ...dep.paths };
+    let discoveredSkills: DiscoveredItem[];
+    let discoveredAgents: DiscoveredItem[];
+    try {
+      [discoveredSkills, discoveredAgents] = await Promise.all([
+        dep.skills === false ? [] : services.discoverSkills(dir, paths.skills),
+        dep.agents === false ? [] : services.discoverAgents(dir, paths.agents),
+      ]);
+    } catch (error) {
+      throw new Error(`${label}: ${(error as Error).message}`);
+    }
 
     const skillResult = services.filterItems(discoveredSkills, dep.skills);
     const agentResult = services.filterItems(discoveredAgents, dep.agents);
 
     if (dep.skills !== false && discoveredSkills.length === 0) {
-      console.warn(`  ⚠ no skills found in ${label} (no skills/ directory or no SKILL.md files)`);
+      const why = (await services.isDirectory(join(dir, paths.skills)))
+        ? `no SKILL.md in any subdirectory of ${displayDir(paths.skills)}`
+        : `${displayDir(paths.skills)} does not exist`;
+      console.warn(`  ⚠ no skills found in ${label} (${why})`);
     }
     if (skillResult.missing.length > 0) {
-      console.warn(`  ⚠ skills not found in ${label}: ${skillResult.missing.join(", ")}`);
+      console.warn(`  ⚠ skills not found in ${label} under ${displayDir(paths.skills)}: ${skillResult.missing.join(", ")}`);
     }
     if (dep.agents !== false && discoveredAgents.length === 0) {
-      console.warn(`  ⚠ no agents found in ${label} (no agents/ directory)`);
+      const why = (await services.isDirectory(join(dir, paths.agents)))
+        ? `no agent subdirectories or .md files in ${displayDir(paths.agents)}`
+        : `${displayDir(paths.agents)} does not exist`;
+      console.warn(`  ⚠ no agents found in ${label} (${why})`);
     }
     if (agentResult.missing.length > 0) {
-      console.warn(`  ⚠ agents not found in ${label}: ${agentResult.missing.join(", ")}`);
+      console.warn(`  ⚠ agents not found in ${label} under ${displayDir(paths.agents)}: ${agentResult.missing.join(", ")}`);
     }
 
     resolved.push({

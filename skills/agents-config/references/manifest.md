@@ -124,9 +124,21 @@ dependencies:
     skills: [skill-creator]      # list, "*"/true for all, false for none
     agents: false
     install_method: copy         # optional per-dependency override
+    paths:                       # optional; where the source keeps them
+      skills: .                  # default skills
+      agents: agents             # default agents
 ```
 
-- Sources expose `skills/<name>/SKILL.md` and `agents/`.
+- Sources expose `skills/<name>/SKILL.md` and `agents/` unless the dependency
+  sets `paths`, relative to the repository (or `path`) root. Each omitted key
+  keeps its standard folder. Absolute paths, `..`, and symlinks resolving
+  outside the dependency are rejected. `paths` is recorded in the lock, so
+  changing it requires `update`.
+- In each folder, skills are immediate subdirectories containing `SKILL.md`;
+  agents are immediate subdirectories or `.md` files. Avoid `agents: .` with
+  `agents: "*"`: at a repository root every `.md` (README, LICENSE) and every
+  subdirectory would count as an agent. List agents by name or use a dedicated
+  folder.
 - `repo` rejects bare filesystem paths; use `path`, or `file://` for a
   versioned local Git repository (uncommitted edits are not included).
 - `path` is resolved relative to the project (or absolute), read live, linked

@@ -66,6 +66,9 @@ confirm with the user first.
 - The project's own skills: keep sources in `skills/<name>/SKILL.md` and
   `agents/`, and add `- path: .` by hand (`add` only takes repositories).
   Path dependencies are live links; edits show up immediately.
+- A source that keeps skills outside `skills/` (e.g. `<name>/SKILL.md` at the
+  repository root): set the dependency's `paths`, e.g. `paths: { skills: . }`.
+  `add` has no flag for it, so edit `agents.yaml` and run `update`.
 - Skills another tool wrote to `.agents/skills` (e.g. OpenSpec) that Claude
   Code can't see: no dependency needed, use `claude-interop`'s `link` setting.
 

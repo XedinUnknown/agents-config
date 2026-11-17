@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-enabled; users may remove stale blocks manually. Handler switches may
   require management enabled to complete old-handler cleanup.
 
+- `link` setting for `*-interop` targets exposes selected unmanaged entries
+  in `.agents/` (names or globs per kind), linked or installed per
+  `unsupported`, recorded as `declared` and covered by the managed
+  `.gitignore` block. Unmatched patterns produce a warning.
+
 ### Changed
 
 - `install` uses locked Git commits, resolving only when no lockfile exists.

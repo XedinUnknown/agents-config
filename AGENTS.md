@@ -136,8 +136,10 @@ that is absent or `null` means "use the handler's default", so `null` in
   ordering), `unsupported: install` installs the requested items. Requested
   items missing from `.agents/` are installed normally. Entries that weren't
   requested (hand-written, or written by another tool such as OpenSpec) are
-  never linked or recorded, so the lock describes only what `agents.yaml`
-  declares and no path is claimed by two tools.
+  left alone unless the target's `link` setting names them (names or globs
+  per non-native kind); those are handled like requested items and recorded
+  with `declared: true`, so the lock still holds only what configuration
+  asks for. `link` is rejected for native kinds and by `codex-interop`.
   Codex agents must be TOML, so `codex-interop` only allows `install`, and
   the `codex` handler itself skips agents (one warning per run; earlier
   copies are pruned) via `flatDirectoryHandler`'s `unsupported` kinds.

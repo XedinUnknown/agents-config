@@ -29,6 +29,7 @@ function serializeDependency(dep: Dependency): Record<string, unknown> {
   if (!isPathDependency(dep) && dep.ref !== "main") entry["ref"] = dep.ref;
   if (dep.skills !== "*") entry["skills"] = dep.skills;
   if (dep.agents !== "*") entry["agents"] = dep.agents;
+  if (dep.paths !== undefined) entry["paths"] = dep.paths;
   if (dep.install_method !== undefined) entry["install_method"] = dep.install_method;
   return entry;
 }

@@ -174,6 +174,22 @@ destination gets a `.gitignore` block listing only the items the tool manages;
 hand-written skills next to them stay visible. See
 [Git ignore management](./docs/configuration.md#git-ignore-management).
 
+### A repository keeps its skills outside `skills/`
+
+Point the dependency's `paths` at the folder that holds them, such as `.` for
+skills at the repository root:
+
+```yaml
+dependencies:
+  - repo: yohei1126/agent-skills
+    skills: [devto-article]
+    agents: false
+    paths:
+      skills: .
+```
+
+See [source layout](./docs/configuration.md#source-layout).
+
 ### Skills should land in a non-standard directory
 
 Reuse a built-in handler under a new target name with its own `paths`, for

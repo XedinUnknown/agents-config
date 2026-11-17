@@ -99,12 +99,43 @@ even if the branch or tag has moved.
 nothing. Set `agents: false` for skill-only dependencies. A dependency's
 `install_method` overrides the run's method for that dependency.
 
-Sources expose skills under `skills/<name>/SKILL.md` and agents under `agents/`.
+Sources expose skills under `skills/<name>/SKILL.md` and agents under `agents/`,
+unless the dependency sets `paths`.
+
+### Source Layout
+
+A dependency that keeps its skills or agents elsewhere names those folders in
+`paths`, relative to the repository (or `path`) root. Each key defaults to the
+standard folder when omitted. A repository with skills at the top level, such
+as `devto-article/SKILL.md`, uses `.`:
+
+```yaml
+dependencies:
+  - repo: yohei1126/agent-skills
+    skills: [devto-article]
+    agents: false
+    paths:
+      skills: .
+```
+
+Discovery in each folder is the same as in the standard ones: skills are
+immediate subdirectories containing `SKILL.md`; agents are immediate
+subdirectories or `.md` files. The paths must stay inside the dependency:
+absolute paths, `..`, and symlinks that resolve outside it are rejected.
+`paths` is part of the declaration recorded in `agents-lock.json`, so changing
+it requires `update`.
+
+> [!WARNING]
+> Avoid `agents: .` with `agents: "*"`. Every `.md` file in the folder counts as
+> an agent, so a repository root also yields `README.md`, `LICENSE.md`, and
+> similar files, and every subdirectory counts as a directory agent. List the
+> agents by name, or point `agents` at a dedicated folder.
 
 ## Local Dependencies
 
 To manage skills or agents authored in this repository, keep their source in
-`skills/<name>/SKILL.md` or `agents/` and declare `path: .`:
+`skills/<name>/SKILL.md` or `agents/` and declare `path: .` (or set
+[`paths`](#source-layout) for another layout):
 
 ```yaml
 dependencies:

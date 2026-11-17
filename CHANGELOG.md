@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-dependency `paths: { skills, agents }` for sources that keep skills or
+  agents outside `skills/` and `agents/`, such as `skills: .` for skills at the
+  repository root. The paths are recorded with the dependency in
+  `agents-lock.json`.
+
+### Changed
+
+- Discovery warnings name the folder searched, and say whether it is missing
+  or has nothing to install.
+
 ## [0.1.0-beta.3] - 2026-11-17
 
 ### Changed

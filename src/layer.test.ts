@@ -208,6 +208,33 @@ test("parseLayer: live path dependencies and install_method; exactly one of repo
   assert.throws(() => parseLayer("dependencies:\n  - path: .\n    install_method: move\n", "x.yaml"), /install_method must be/);
 });
 
+test("parseLayer: dependency paths are normalized, kept only when declared, and must stay inside the dependency", () => {
+  assert.deepEqual(
+    parseLayer(
+      "dependencies:\n  - repo: o/r\n    paths:\n      skills: ./\n  - path: lib\n    paths: { skills: ./src/skills/, agents: subagents }\n  - repo: o/s\n",
+      "x.yaml"
+    ).dependencies,
+    [
+      { repo: "o/r", ref: "main", skills: "*", agents: "*", paths: { skills: "." } },
+      { path: "lib", skills: "*", agents: "*", paths: { skills: "src/skills", agents: "subagents" } },
+      { repo: "o/s", ref: "main", skills: "*", agents: "*" },
+    ]
+  );
+  const invalid: Array<[string, RegExp]> = [
+    ["paths: skills", /'paths' must be a map of skills\/agents directories/],
+    ["paths: [skills]", /'paths' must be a map/],
+    ["paths: { commands: x }", /unknown key 'paths\.commands'/],
+    ['paths: { skills: "" }', /'paths\.skills' must be a non-empty string/],
+    ["paths: { agents: 1 }", /'paths\.agents' must be a non-empty string/],
+    ["paths: { skills: .. }", /'paths\.skills' must be a folder inside the dependency/],
+    ["paths: { skills: a/../../b }", /'paths\.skills' must be a folder inside the dependency/],
+    ["paths: { agents: /etc }", /'paths\.agents' must be a folder inside the dependency/],
+  ];
+  for (const [yaml, error] of invalid) {
+    assert.throws(() => parseLayer(`dependencies:\n  - repo: o/r\n    ${yaml}\n`, "x.yaml"), error, yaml);
+  }
+});
+
 test("parseLayer rejects any ref on a path dependency with a versioned local repo hint", () => {
   for (const ref of ["v1", '""', "null", "", "false", "123", "[]", "{}"]) {
     assert.throws(

@@ -6,12 +6,16 @@
  *   skills: immediate subdirectories of skills/ containing SKILL.md
  *   agents: immediate subdirectories of agents/, or *.md files directly in agents/
  *
+ * A dependency can name other folders through its `paths` (see layer.ts),
+ * such as `.` for a repository that keeps its skills at the top level. The
+ * folder must stay inside the dependency, symlinks included.
+ *
  * This is deliberately the same shape agentdeps used for reading a source repo —
  * the bug agentdeps had was in how it *installed* these into the target, not in
  * how it read them from the source.
  */
-import { readdir, access } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, access, realpath } from "node:fs/promises";
+import { join, relative, isAbsolute } from "node:path";
 import type { Provider } from "./di/index.ts";
 
 export interface DiscoveredItem {
@@ -19,15 +23,33 @@ export interface DiscoveredItem {
   sourcePath: string;
 }
 
-export async function discoverSkills(repoPath: string): Promise<DiscoveredItem[]> {
-  const skillsDir = join(repoPath, "skills");
-
-  let entries;
+/**
+ * The entries of `dir` inside `root`, or undefined when it doesn't exist.
+ * Throws when `dir` resolves outside `root`, e.g. through a symlink.
+ */
+async function readSourceDir(root: string, dir: string) {
+  const full = join(root, dir);
+  let real: string;
   try {
-    entries = await readdir(skillsDir, { withFileTypes: true });
+    real = await realpath(full);
   } catch {
-    return [];
+    return undefined;
   }
+  const inside = relative(await realpath(root), real);
+  if (inside === ".." || inside.startsWith("../") || isAbsolute(inside)) {
+    throw new Error(`${dir} resolves outside the dependency (${real})`);
+  }
+  try {
+    return { path: full, entries: await readdir(full, { withFileTypes: true }) };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function discoverSkills(repoPath: string, dir = "skills"): Promise<DiscoveredItem[]> {
+  const source = await readSourceDir(repoPath, dir);
+  if (source === undefined) return [];
+  const { path: skillsDir, entries } = source;
 
   const dirs = entries.filter((e) => e.isDirectory());
   const checks = await Promise.all(
@@ -46,15 +68,10 @@ export async function discoverSkills(repoPath: string): Promise<DiscoveredItem[]
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function discoverAgents(repoPath: string): Promise<DiscoveredItem[]> {
-  const agentsDir = join(repoPath, "agents");
-
-  let entries;
-  try {
-    entries = await readdir(agentsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+export async function discoverAgents(repoPath: string, dir = "agents"): Promise<DiscoveredItem[]> {
+  const source = await readSourceDir(repoPath, dir);
+  if (source === undefined) return [];
+  const { path: agentsDir, entries } = source;
 
   const agents: DiscoveredItem[] = [];
   for (const entry of entries) {

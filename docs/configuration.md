@@ -227,7 +227,7 @@ Each list holds names or globs (`*` matches any run of characters, `?` one
 character); agents are named without their `.md` extension. Matching entries
 are handled like requested items of that kind: linked under
 `unsupported: symlink`, or installed following `install_method` under
-`unsupported: install`. They are recorded in the target's lock state with
+`unsupported: install`. They are recorded in the target's install state with
 `declared: true` and covered by the managed `.gitignore` block. Removing a
 name from `link` removes what it exposed, never the shared entry itself. A
 pattern that matches no entry produces a warning, since the tool that writes it

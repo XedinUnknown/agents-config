@@ -222,13 +222,15 @@ test("run/install merges config.yaml defaults with agents.yaml, the later depend
     assert.equal(await readFile(join(skills, "shared", "SKILL.md"), "utf-8"), "# from project");
     assert.equal(await pathExists(join(skills, "only-default", "SKILL.md")), true);
     // config.yaml declared targets, so the interop fallback is not used.
-    assert.equal(await pathExists(join(projectDir, ".agents")), false);
+    assert.equal(await pathExists(join(projectDir, ".agents", "skills")), false);
 
     const lock = JSON.parse(await readFile(join(projectDir, "agents-lock.json"), "utf-8"));
     assert.deepEqual(lock.skills.shared, { repo: `file://${project}`, ref: "main", commit:
       (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: project })).stdout.trim() });
-    assert.deepEqual(lock.targets.claude.handler, "claude");
-    assert.deepEqual(Object.keys(lock.targets.claude.state.installs).sort(), [join(".claude", "skills", "only-default"), join(".claude", "skills", "shared")]);
+    assert.equal("targets" in lock, false);
+    const state = await readState(projectDir);
+    assert.deepEqual(state.targets.claude.handler, "claude");
+    assert.deepEqual(Object.keys(state.targets.claude.state.installs).sort(), [join(".claude", "skills", "only-default"), join(".claude", "skills", "shared")]);
     // No per-directory locks any more.
     assert.equal(await pathExists(join(skills, "agents-lock.json")), false);
   } finally {
@@ -295,7 +297,9 @@ test("run/install reports counts instead of item names, preserves warnings, and 
     filterItems: () => ({ selected: [], missing: [] }),
     manifestExists: async (path) => path.endsWith("agents.yaml"),
     loadManifest: async () => ({}),
-    loadLock: async () => emptyLock(),
+    loadLock: async () => ({ lock: emptyLock() }),
+    loadState: async () => undefined,
+    saveState: async () => {},
     saveLock: async () => {},
     getHandler: () => ({ sync: async () => report }),
   });
@@ -337,7 +341,9 @@ test("run/install aborts before syncing or saving the lock when a dependency can
         loadManifest: async () => ({
           dependencies: [{ repo: "owner/repo", ref: "main", skills: "*", agents: false }],
         }),
-        loadLock: async () => emptyLock(),
+        loadLock: async () => ({ lock: emptyLock() }),
+    loadState: async () => undefined,
+    saveState: async () => {},
         saveLock: async () => {
           saved = true;
         },
@@ -397,6 +403,15 @@ async function readLock(projectDir: string) {
   return JSON.parse(await readFile(join(projectDir, "agents-lock.json"), "utf-8"));
 }
 
+async function readState(projectDir: string) {
+  try {
+    return JSON.parse(await readFile(join(projectDir, ".agents", "agents-config", "state.json"), "utf-8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { targets: {} };
+    throw error;
+  }
+}
+
 test("a module adds a handler: it gets the requested skills and its settings, owns its record, and undoes it when disabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "agents-config-run-handler-"));
   try {
@@ -412,17 +427,17 @@ test("a module adds a handler: it gets the requested skills and its settings, ow
 
     await install();
     assert.equal(await readFile(join(projectDir, "registry.txt"), "utf-8"), "demo");
-    assert.deepEqual((await readLock(projectDir)).targets, {
+    assert.deepEqual((await readState(projectDir)).targets, {
       "my-harness": { handler: "registry", state: { file: "registry.txt" } },
     });
     // Only the custom target is enabled, so no built-in handler ran.
-    assert.equal(await pathExists(join(projectDir, ".agents")), false);
+    assert.deepEqual(await readdir(join(projectDir, ".agents")), ["agents-config"]);
 
     await writeFile(join(projectDir, "agents.yaml"), `targets:\n  my-harness: false\n${deps}`);
     await install();
     assert.deepEqual(calls.at(-1), { target: "my-harness", skills: [], state: { file: "registry.txt" } });
     assert.equal(await pathExists(join(projectDir, "registry.txt")), false);
-    assert.deepEqual((await readLock(projectDir)).targets, {});
+    assert.deepEqual((await readState(projectDir)).targets, {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -447,7 +462,7 @@ test("removing a custom handler target retains opaque state until that handler c
     await install();
     await writeFile(join(project, "agents.yaml"), `targets: {}\n${deps}`);
     await install();
-    assert.deepEqual((await readLock(project)).targets.custom.state, { opaque: { nested: [1, 2, 3] } });
+    assert.deepEqual((await readState(project)).targets.custom.state, { opaque: { nested: [1, 2, 3] } });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -481,13 +496,13 @@ test("handler switch retains an empty custom state when cleanup is blocked and r
     await install();
     await writeFile(join(project, "agents.yaml"), `targets:\n  mine:\n    handler: claude\n${deps}`);
     await assert.rejects(install(), /external cleanup must be retried/);
-    assert.deepEqual((await readLock(project)).targets.mine, { handler: "registry", state: {} });
+    assert.deepEqual((await readState(project)).targets.mine, { handler: "registry", state: {} });
     assert.equal(await pathExists(join(project, ".claude", "skills", "demo")), false);
 
     blockCleanup = false;
     await install();
     assert.equal(cleanupCalls, 2);
-    assert.deepEqual((await readLock(project)).targets.mine.handler, "claude");
+    assert.deepEqual((await readState(project)).targets.mine.handler, "claude");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -520,7 +535,7 @@ test("run/install: renaming a target or switching its handler undoes the old ins
     await install();
     assert.equal(await pathExists(join(projectDir, "t", "demo")), false);
     assert.equal(await readFile(join(projectDir, "reg.txt"), "utf-8"), "demo");
-    assert.deepEqual((await readLock(projectDir)).targets, { ours: { handler: "registry", state: { file: "reg.txt" } } });
+    assert.deepEqual((await readState(projectDir)).targets, { ours: { handler: "registry", state: { file: "reg.txt" } } });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -544,7 +559,7 @@ test("handler switch retains pending ignore cleanup and retries before installin
     await symlink(saved, ignore);
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
     await assert.rejects(install(), /cannot switch handlers: .gitignore cleanup is pending/);
-    const lock = await readLock(project);
+    const lock = await readState(project);
     assert.equal(lock.targets.ours.handler, "claude");
     assert.deepEqual(lock.targets.ours.state.ignorePending, ["t"]);
     assert.equal(await pathExists(join(project, "reg.txt")), false);
@@ -574,7 +589,7 @@ test("handler switch retains modified built-in installs and their ignore rules u
     await writeFile(join(item, "SKILL.md"), "modified");
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  ours:\n    handler: registry\n    file: reg.txt\n${deps}`);
     await assert.rejects(install(), /cannot switch handlers: modified installs remain owned/);
-    const lock = await readLock(project);
+    const lock = await readState(project);
     assert.equal(lock.targets.ours.handler, "claude");
     assert.ok(lock.targets.ours.state.installs["t/demo"]);
     assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
@@ -606,19 +621,19 @@ test("ignore management can be enabled for existing installs, disabled through p
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude: true\n${deps}`);
     await install();
     assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
-    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
+    assert.deepEqual((await readState(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
 
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: false\ntargets:\n  claude: true\n${deps}`);
     await install();
     assert.equal(await readFile(ignore, "utf8").then((text) => text.includes("/demo")), true);
-    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
+    assert.deepEqual((await readState(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
 
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude: true\n${deps}`);
     await install();
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets: {}\n${deps}`);
     await install();
     assert.equal(await readFile(ignore, "utf8"), "");
-    assert.deepEqual((await readLock(project)).targets, {});
+    assert.deepEqual((await readState(project)).targets, {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -643,13 +658,13 @@ test("disabled management preserves old and new destination bookkeeping through 
     assert.match(await readFile(oldIgnore, "utf8"), /\/demo\n/);
     assert.equal(await pathExists(join(project, "old", "skills", "demo")), false);
     assert.equal(await pathExists(newIgnore), false);
-    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, ["old/skills"]);
+    assert.deepEqual((await readState(project)).targets.claude.state.managedIgnoreDirs, ["old/skills"]);
 
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets:\n  claude:\n    paths: { skills: new/skills }\n${deps}`);
     await install();
     assert.equal(await readFile(oldIgnore, "utf8"), "");
     assert.match(await readFile(newIgnore, "utf8"), /\/demo\n/);
-    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, ["new/skills"]);
+    assert.deepEqual((await readState(project)).targets.claude.state.managedIgnoreDirs, ["new/skills"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -671,12 +686,12 @@ test("removed target keeps ignore bookkeeping while disabled and cleans it when 
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: false\ntargets: {}\n${deps}`);
     await install();
     assert.match(await readFile(ignore, "utf8"), /\/demo\n/);
-    assert.deepEqual((await readLock(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
+    assert.deepEqual((await readState(project)).targets.claude.state.managedIgnoreDirs, [".claude/skills"]);
 
     await writeFile(join(project, "agents.yaml"), `manage_gitignore: true\ntargets: {}\n${deps}`);
     await install();
     assert.equal(await readFile(ignore, "utf8"), "");
-    assert.deepEqual((await readLock(project)).targets, {});
+    assert.deepEqual((await readState(project)).targets, {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -738,16 +753,15 @@ test("run/install refuses to forget a target's install when the handler that mad
     const projectDir = join(root, "project");
     await mkdir(projectDir, { recursive: true });
     await writeFile(join(projectDir, "agents.yaml"), "targets: {}\ndependencies: []\n");
-    const lock = {
-      version: 2,
-      skills: {},
-      agents: {},
+    const state = {
+      version: 1,
       targets: { "my-harness": { handler: "registry", state: { file: "registry.txt" } } },
     };
-    await writeFile(join(projectDir, "agents-lock.json"), JSON.stringify(lock));
+    await mkdir(join(projectDir, ".agents", "agents-config"), { recursive: true });
+    await writeFile(join(projectDir, ".agents", "agents-config", "state.json"), JSON.stringify(state));
 
     await assert.rejects(() => installFor(root, projectDir)(), /Target 'my-harness' was installed by the 'registry' handler/);
-    assert.deepEqual(await readLock(projectDir), lock);
+    assert.deepEqual(await readState(projectDir), state);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -907,4 +921,64 @@ describe("path dependencies", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+});
+
+test("install state lives in a self-ignoring state_dir, kept out of the lock and removed once empty", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-run-state-dir-"));
+  const warn = console.warn;
+  const warnings: string[] = [];
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "targets:\n  interop: true\n");
+    const projectDir = join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    const deps = `dependencies:\n  - repo: file://${source}\n    agents: false\n`;
+    await writeFile(join(projectDir, "agents.yaml"), deps);
+    await installFor(root, projectDir)();
+    const defaultState = join(projectDir, ".agents", "agents-config");
+    assert.equal(await readFile(join(defaultState, ".gitignore"), "utf-8"), "*\n");
+    assert.equal("targets" in (await readLock(projectDir)), false);
+
+    // Another location: what was recorded at the default is not read, and that is reported.
+    console.warn = (message: string) => { warnings.push(message); };
+    await writeFile(join(projectDir, "agents.yaml"), `state_dir: state\n${deps}`);
+    await installFor(root, projectDir)();
+    assert.ok(warnings.some((w) => w.includes("state_dir is state")), warnings.join("\n"));
+    // The existing install is foreign there, so it is left alone and nothing is owned.
+    assert.equal(await pathExists(join(projectDir, "state")), false);
+    assert.equal(await readFile(join(projectDir, ".agents", "skills", "demo", "SKILL.md"), "utf-8"), "# demo");
+
+    // Moved by hand, it owns the install again, and removing everything removes the directory.
+    await rename(defaultState, join(projectDir, "state"));
+    await writeFile(join(projectDir, "agents.yaml"), "state_dir: state\ndependencies: []\n");
+    await installFor(root, projectDir, "update")();
+    assert.equal(await pathExists(join(projectDir, ".agents", "skills", "demo")), false);
+    assert.equal(await pathExists(join(projectDir, "state")), false);
+  } finally {
+    console.warn = warn;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a version 2 lock's install state seeds the state file only when this machine has none", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agents-config-run-legacy-state-"));
+  try {
+    const source = await makeSourceRepo(root, "source", { demo: "# demo" });
+    await writeConfig(join(root, "config"), "targets:\n  interop: true\n");
+    const projectDir = join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(join(projectDir, "agents.yaml"), `dependencies:\n  - repo: file://${source}\n    agents: false\n`);
+    await installFor(root, projectDir)();
+    const mine = await readState(projectDir);
+
+    // A committed version 2 lock carrying another machine's targets.
+    const other = { "claude-interop": { handler: "claude-interop", state: { installs: {} } } };
+    await writeFile(join(projectDir, "agents-lock.json"),
+      JSON.stringify({ ...(await readLock(projectDir)), version: 2, targets: other }));
+    await installFor(root, projectDir)();
+    assert.deepEqual(await readState(projectDir), mine);
+    assert.equal((await readLock(projectDir)).version, 3);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

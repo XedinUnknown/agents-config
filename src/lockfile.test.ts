@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, access, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, access, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadLock, saveLock, lockPath, emptyLock, type LockFile } from "./lockfile.ts";
@@ -24,20 +24,21 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 const sampleLock: LockFile = {
-  version: 2,
+  version: 3,
   skills: { foo: { repo: "owner/repo", ref: "main" } },
   agents: {},
-  targets: {
-    interop: {
-      handler: "interop",
-      state: { installs: { ".agents/skills/foo": { kind: "skills", name: "foo", method: "copy", contentHash: "abc" } } },
-    },
+};
+
+const legacyTargets = {
+  interop: {
+    handler: "interop",
+    state: { installs: { ".agents/skills/foo": { kind: "skills", name: "foo", method: "copy", contentHash: "abc" } } },
   },
 };
 
 test("loadLock returns an empty lock when no file exists", async () => {
   await withTmpDir(async (dir) => {
-    assert.deepEqual(await loadLock(dir), emptyLock());
+    assert.deepEqual(await loadLock(dir), { lock: emptyLock() });
   });
 });
 
@@ -55,7 +56,18 @@ test("saveLock then loadLock round-trips, next to the project's agents.yaml", as
   await withTmpDir(async (dir) => {
     await saveLock(dir, sampleLock);
     assert.equal(lockPath(dir), join(dir, "agents-lock.json"));
-    assert.deepEqual(await loadLock(dir), sampleLock);
+    assert.deepEqual(await loadLock(dir), { lock: sampleLock });
+    assert.equal((await readFile(lockPath(dir), "utf-8")).includes("targets"), false);
+  });
+});
+
+test("loadLock hands a version 2 lock's install state back as legacy targets", async () => {
+  await withTmpDir(async (dir) => {
+    await writeFile(lockPath(dir), JSON.stringify({ ...sampleLock, version: 2, targets: legacyTargets }));
+    assert.deepEqual(await loadLock(dir), { lock: sampleLock, legacyTargets });
+
+    await writeFile(lockPath(dir), JSON.stringify({ ...sampleLock, version: 2 }));
+    await assert.rejects(() => loadLock(dir), /unsupported lockfile format/);
   });
 });
 
@@ -66,10 +78,10 @@ test("locked resolutions round-trip even with no selected items or targets", asy
       commit: "a".repeat(40),
     }] };
     await saveLock(dir, lock);
-    assert.deepEqual(await loadLock(dir), lock);
+    assert.deepEqual(await loadLock(dir), { lock });
     lock.dependencies = [];
     await saveLock(dir, lock);
-    assert.deepEqual(await loadLock(dir), lock);
+    assert.deepEqual(await loadLock(dir), { lock });
   });
 });
 

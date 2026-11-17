@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseLayer, mergeLayers, dependencyKey } from "./layer.ts";
+import { join } from "node:path";
 
 const names = (layers: Parameters<typeof mergeLayers>[0]) => mergeLayers(layers).targets.map((t) => t.name);
 
@@ -213,5 +214,15 @@ test("parseLayer rejects any ref on a path dependency with a versioned local rep
       () => parseLayer(`dependencies:\n  - path: .\n    ref: ${ref}\n`, "x.yaml"),
       /x\.yaml: dependency at index 0: 'ref' is not supported for path dependencies; paths are always live\. Use 'repo: file:\/\/\/absolute\/path\/to\/repository' with 'ref'/
     );
+  }
+});
+
+test("state_dir defaults to .agents/agents-config, is a scalar, and cannot be the project itself", () => {
+  assert.equal(mergeLayers([]).state_dir, join(".agents", "agents-config"));
+  assert.equal(mergeLayers([{ state_dir: "machine" }, { state_dir: "agents-config" }]).state_dir, "agents-config");
+  assert.equal(mergeLayers([{ state_dir: "agents-config" }, {}]).state_dir, "agents-config");
+  assert.equal(parseLayer("state_dir: agents-config\n", "x.yaml").state_dir, "agents-config");
+  for (const value of ['"."', '"./"', '""', "1", "[a]"]) {
+    assert.throws(() => parseLayer(`state_dir: ${value}\n`, "x.yaml"), /invalid state_dir/);
   }
 });

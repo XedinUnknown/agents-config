@@ -9,7 +9,7 @@
  * the project directory); a target's config overrides either one, and an
  * absent or null value means the default.
  *
- * Each target's record in agents-lock.json lists every concrete path the
+ * Each target's record in the install state (state.ts) lists every concrete path the
  * handler installed for it, so only those are ever updated or removed.
  */
 import { mkdir, rm, cp, lstat, symlink, readlink, unlink, stat, readdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
@@ -41,11 +41,9 @@ export interface FileInstall {
   contentHash: string;
   /** Set for an unmanaged interop entry the target's `link` setting asks for, rather than a dependency install. */
   declared?: true;
-  installedAt: string;
-  updatedAt: string;
 }
 
-/** A built-in handler's state: its target's record in agents-lock.json. */
+/** A built-in handler's state: its target's record in the install state. */
 export interface FilesState {
   installs?: Record<string, FileInstall>;
   ignorePending?: string[];
@@ -346,7 +344,6 @@ export async function syncFiles(
 
     markPending(path);
     await mkdir(dirname(abs), { recursive: true });
-    const now = new Date().toISOString();
 
     if ((item.method ?? installMethod) === "link") {
       const outcome = await ensureSymlink(linkTarget(projectDir, abs, item.sourcePath), abs, await isFile(item.sourcePath));
@@ -356,8 +353,6 @@ export async function syncFiles(
         method: "link",
         contentHash: "",
         ...(item.declared ? { declared: true as const } : {}),
-        installedAt: prior?.installedAt ?? now,
-        updatedAt: outcome === "unchanged" && prior ? prior.updatedAt : now,
       };
       if (outcome === "unchanged" && prior) result.unchanged.push(path);
       else if (prior) result.updated.push(path);
@@ -382,8 +377,6 @@ export async function syncFiles(
       method: "copy",
       contentHash,
       ...(item.declared ? { declared: true as const } : {}),
-      installedAt: prior?.installedAt ?? now,
-      updatedAt: now,
     };
     if (prior) result.updated.push(path);
     else result.added.push(path);

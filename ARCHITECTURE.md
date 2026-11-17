@@ -50,19 +50,26 @@ defaults. There is no implicit target.
 
 ## Ownership and Cleanup
 
-One project-level `agents-lock.json` records the winning sources and each
-target's handler and opaque handler-owned state. Built-in handler state records
-concrete installed paths relative to the project directory. Ownership is per
-item, not per destination directory.
+One project-level `agents-lock.json` records dependency resolutions and the
+winning sources; it is derived from dependency declarations alone, so it is
+identical across machines. Install state, in `<state_dir>/state.json`
+(`src/state.ts`), records each target's handler and opaque handler-owned state.
+It depends on machine configuration and is ignored by Git through a
+`.gitignore` in the state directory. Built-in handler state records concrete
+installed paths relative to the project directory. Ownership is per item, not
+per destination directory.
 
 - Only recorded paths are candidates for overwrite or removal. Unmanaged
   content is left alone and conflicts are reported.
-- Desired lock-owned copies that are missing or modified are restored.
+- Desired owned copies that are missing or modified are restored.
 - Stale modified copies, or links replaced by real files, are warned about
   and preserved with their ownership record.
 - Copy change detection uses SHA-256 over sorted paths and file contents,
   not file size or modification time.
-- Unreadable or old-format locks abort rather than silently losing ownership.
+- Unreadable or unknown-format locks and state files abort rather than
+  silently losing ownership. A version 2 lock's `targets` seed the state file
+  when none exists; an existing state file wins, since a committed lock may
+  carry another machine's state.
 
 When the merged top-level `manage_gitignore` setting is true, built-in flat
 handlers synchronize a marked block per target in each destination's

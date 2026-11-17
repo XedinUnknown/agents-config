@@ -33,6 +33,7 @@ import { repoProvider } from "./cache.ts";
 import { discoveryProvider } from "./discovery.ts";
 import { manifestProvider } from "./manifest.ts";
 import { lockfileProvider } from "./lockfile.ts";
+import { stateProvider } from "./state.ts";
 import { hashProvider } from "./hash.ts";
 import { installProvider } from "./install.ts";
 import { runProvider } from "./run.ts";
@@ -76,6 +77,7 @@ export function bootstrapApp(opts: BootstrapOptions): Container {
     ["discovery", discoveryProvider()],
     ["manifest", manifestProvider()],
     ["lockfile", lockfileProvider()],
+    ["state", stateProvider()],
     ["hash", hashProvider()],
     ["install", installProvider()],
     ["run", runProvider()],

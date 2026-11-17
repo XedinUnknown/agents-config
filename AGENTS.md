@@ -27,24 +27,29 @@ after they were installed flat, while `opencode debug skill` and
 
 **Core fix: flat install + a lockfile, not a nested managed directory.** Items
 install directly as top-level children of the real skills/agents directory, so
-every harness finds them, including flat-scanning ones like Claude Code. Ownership is tracked in one
-project-level `agents-lock.json`, next to `agents.yaml`, which records the
-final winner per skill/agent name plus one record per target: the handler
+every harness finds them, including flat-scanning ones like Claude Code. Ownership is tracked in per-machine
+install state, `<state_dir>/state.json` (`.agents/agents-config` by default,
+ignored through its own `.gitignore`): one record per target, the handler
 that installed it and that handler's own state (see Target handlers). The
 built-in handlers' state lists every concrete path installed (relative to
-the project directory). On sync, for the built-in handlers:
+the project directory). The committed `agents-lock.json`, next to
+`agents.yaml`, holds only what is the same on every machine: dependency
+resolutions and the final winner per skill/agent name. Targets come partly
+from machine config, so their state can't be committed without every
+contributor's install rewriting it. On sync, for the built-in handlers:
 
-- Only lock-recorded paths are candidates for removal or overwrite.
-- A path that exists on disk but isn't lock-owned is left untouched, even if
+- Only state-recorded paths are candidates for removal or overwrite.
+- A path that exists on disk but isn't owned is left untouched, even if
   desired (protects hand-authored skills sharing the directory). Two targets
   whose paths coincide therefore conflict: the second reports the first's
   installs as foreign. Built-in defaults don't overlap.
-- A lock-owned path no longer desired but modified on disk since install
+- A owned path no longer desired but modified on disk since install
   (copy hash mismatch, or a link replaced by a real file) is warned about and
-  left in place, still owned. Desired lock-owned copies that are missing or
+  left in place, still owned. Desired owned copies that are missing or
   modified are restored.
-- An unreadable or old-format lockfile aborts rather than starting empty —
-  starting empty would turn every previous install into foreign content.
+- An unreadable or unknown-format lockfile or state file aborts rather than
+  starting empty — starting empty would turn every previous install into
+  foreign content. A version 2 lock's `targets` seed missing state.
 - Change detection for `install_method: copy` uses a real content hash (sha256
   over sorted file paths + contents), not size/mtime heuristics.
 - Links whose target is inside the project (the `*-interop` mirrors) are
@@ -321,7 +326,7 @@ Design notes not obvious from `--help` (see `install --help` for the
       below, on `~/.agents`'s dependencies, which all set `agents: false`). The
       readiness pass also fixed cache keys for refs containing `/`, prevented a
       failed dependency fetch from turning into destructive pruning, and made
-      copy installs restore lock-owned content that is missing or locally
+      copy installs restore owned content that is missing or locally
       modified.
 - [x] Exercised the real CLI (not just internal function calls) end-to-end via
       the new `--config <dir>` flag, in full isolation: a scratch config dir
@@ -388,7 +393,7 @@ Design notes not obvious from `--help` (see `install --help` for the
       already gone (no separate cleanup needed).
 - [ ] `codex` harness entry unverified (see Constraints).
 - [x] Built-in handlers can maintain per-target `.gitignore` blocks in
-      destination directories for lock-owned installs when `manage_gitignore`
+      destination directories for owned installs when `manage_gitignore`
       is enabled. See Configuration and Architecture for preservation, opt-in
       behavior, retry, and Git tracking limitations.
 - [ ] Roadmap: convert Markdown agents to Codex's TOML format in the `codex`
